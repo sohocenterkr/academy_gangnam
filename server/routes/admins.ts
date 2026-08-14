@@ -134,6 +134,21 @@ export function createAdminsRouter(deps: AdminsRouterDeps): Router {
       return;
     }
 
+    const wouldDeactivate = parsed.status !== undefined && parsed.status !== 'active';
+    const wouldChangeRole = parsed.roleId !== undefined && parsed.roleId !== before.roleId;
+    if (wouldDeactivate || wouldChangeRole) {
+      if (await isLastActiveSuperAdmin(before.id, before.roleId)) {
+        res.status(409).json({
+          error: {
+            code: 'LAST_SUPER_ADMIN',
+            message: '마지막 최고관리자는 상태·역할을 변경할 수 없습니다.',
+            requestId: req.requestId,
+          },
+        });
+        return;
+      }
+    }
+
     const { expectedUpdatedAt: _expected, ...changes } = parsed;
     const [updated] = await db
       .update(admins)

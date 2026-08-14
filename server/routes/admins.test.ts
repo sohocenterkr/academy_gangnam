@@ -54,6 +54,7 @@ async function cleanup() {
   await db.delete(admins).where(eq(admins.email, SUPER_EMAIL));
   await db.delete(admins).where(eq(admins.email, NEW_ADMIN_EMAIL));
   await db.delete(roles).where(eq(roles.name, 'test-admins-super-role'));
+  await db.delete(roles).where(eq(roles.name, 'test-admins-plain-role'));
 }
 
 describe('admins routes', () => {
@@ -120,5 +121,42 @@ describe('admins routes', () => {
       .send({ name: '또수정', expectedUpdatedAt: created.body.data.updatedAt });
     expect(staleEditResponse.status).toBe(409);
     expect(staleEditResponse.body.error.code).toBe('VERSION_CONFLICT');
+  });
+
+  it('refuses to set the last active super-admin to a non-active status via PATCH', async () => {
+    const { admin } = await seedSuperAdmin();
+    const app = createApp({ emailAdapter: createFakeEmailAdapter() });
+    const cookie = await loginAs(app, SUPER_EMAIL);
+    // Login itself updates the admin's updatedAt (failedLoginCount/lastLoginAt reset), so re-fetch
+    // the current representation instead of reusing the pre-login value from seedSuperAdmin — otherwise
+    // the optimistic-lock check would fire first with VERSION_CONFLICT before reaching the guard under test.
+    const current = await request(app).get(`/api/admins/${admin.id}`).set('Cookie', cookie);
+
+    const response = await request(app)
+      .patch(`/api/admins/${admin.id}`)
+      .set('Cookie', cookie)
+      .send({ status: 'inactive', expectedUpdatedAt: current.body.data.updatedAt });
+
+    expect(response.status).toBe(409);
+    expect(response.body.error.code).toBe('LAST_SUPER_ADMIN');
+  });
+
+  it('refuses to move the last active super-admin to a non-super role via PATCH', async () => {
+    const { admin } = await seedSuperAdmin();
+    const [plainRole] = await db.insert(roles).values({ name: 'test-admins-plain-role', permissions: [] }).returning();
+    if (!plainRole) throw new Error('failed to seed plain role');
+
+    const app = createApp({ emailAdapter: createFakeEmailAdapter() });
+    const cookie = await loginAs(app, SUPER_EMAIL);
+    // Same reasoning as above: re-fetch post-login state before computing expectedUpdatedAt.
+    const current = await request(app).get(`/api/admins/${admin.id}`).set('Cookie', cookie);
+
+    const response = await request(app)
+      .patch(`/api/admins/${admin.id}`)
+      .set('Cookie', cookie)
+      .send({ roleId: plainRole.id, expectedUpdatedAt: current.body.data.updatedAt });
+
+    expect(response.status).toBe(409);
+    expect(response.body.error.code).toBe('LAST_SUPER_ADMIN');
   });
 });

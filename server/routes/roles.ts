@@ -1,10 +1,10 @@
-import { eq } from 'drizzle-orm';
+import { and, eq, isNull } from 'drizzle-orm';
 import { Router } from 'express';
 import { z } from 'zod';
 import { getNowKSTISOString } from '@shared/kst';
-import { PERMISSIONS } from '@shared/permissions';
+import { PERMISSIONS, SUPER_ADMIN_WILDCARD_PERMISSION } from '@shared/permissions';
 import { db } from '../db';
-import { roles } from '@shared/schema';
+import { admins, roles } from '@shared/schema';
 import { parseBody } from '../utils/validate';
 import { createRequireAuth } from '../middleware/auth';
 import { createRequirePermission } from '../middleware/permissions';
@@ -78,6 +78,29 @@ export function createRolesRouter(deps: RolesRouterDeps): Router {
     if (!before) {
       res.status(404).json({ error: { code: 'NOT_FOUND', message: '역할을 찾을 수 없습니다.', requestId: req.requestId } });
       return;
+    }
+
+    const removingWildcard =
+      parsed.permissions !== undefined &&
+      before.permissions.includes(SUPER_ADMIN_WILDCARD_PERMISSION) &&
+      !parsed.permissions.includes(SUPER_ADMIN_WILDCARD_PERMISSION);
+
+    if (removingWildcard) {
+      const activeAdminsUnderThisRole = await db
+        .select({ id: admins.id })
+        .from(admins)
+        .where(and(eq(admins.roleId, before.id), eq(admins.status, 'active'), isNull(admins.deletedAt)));
+
+      if (activeAdminsUnderThisRole.length > 0) {
+        res.status(409).json({
+          error: {
+            code: 'LAST_SUPER_ADMIN',
+            message: '마지막 최고관리자 권한을 제거할 수 없습니다.',
+            requestId: req.requestId,
+          },
+        });
+        return;
+      }
     }
 
     const [updated] = await db

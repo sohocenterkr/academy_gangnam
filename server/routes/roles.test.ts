@@ -92,4 +92,18 @@ describe('roles routes', () => {
     const response = await request(app).get('/api/roles');
     expect(response.status).toBe(401);
   });
+
+  it('refuses to strip the wildcard permission from the last active super-admin role', async () => {
+    const { superRole } = await seedAdmins();
+    const app = createApp({ emailAdapter: createFakeEmailAdapter() });
+    const cookie = await loginAs(app, SUPER_EMAIL);
+
+    const response = await request(app)
+      .patch(`/api/roles/${superRole.id}`)
+      .set('Cookie', cookie)
+      .send({ permissions: [] });
+
+    expect(response.status).toBe(409);
+    expect(response.body.error.code).toBe('LAST_SUPER_ADMIN');
+  });
 });
