@@ -3,7 +3,8 @@
   "compilerOptions": {
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "jsx": "react-jsx",
-    "types": ["vite/client", "@testing-library/jest-dom"]
+    "types": ["vite/client", "@testing-library/jest-dom"],
+    "paths": { "@shared/*": ["../shared/*"] }
   },
   "include": ["src", "../shared"]
 }

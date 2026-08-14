@@ -1,1 +1,1 @@
-export * from '../../../shared/kst';
+export * from '@shared/kst';

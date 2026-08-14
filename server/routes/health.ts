@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { getNowKSTISOString } from '../../shared/kst';
+import { getNowKSTISOString } from '@shared/kst';
 
 export const healthRouter = Router();
 
