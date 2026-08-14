@@ -1,10 +1,11 @@
 import request from 'supertest';
 import { describe, expect, it } from 'vitest';
 import { createApp } from '../app';
+import { createFakeEmailAdapter } from '../services/email';
 
 describe('GET /api/health', () => {
   it('returns an ok status and db status inside the standard success envelope', async () => {
-    const app = createApp();
+    const app = createApp({ emailAdapter: createFakeEmailAdapter() });
 
     const response = await request(app).get('/api/health');
 
