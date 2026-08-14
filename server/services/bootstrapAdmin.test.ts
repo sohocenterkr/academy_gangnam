@@ -48,6 +48,9 @@ describe('bootstrapAdmin', () => {
         .from(roles)
         .where(eq(roles.name, SUPER_ADMIN_ROLE_NAME));
       expect(createdRole).toBeDefined();
+      if (!createdRole) {
+        throw new Error('Role creation failed in test');
+      }
       expect(createdRole.permissions).toEqual(['*']);
 
       const [createdAdmin] = await db
@@ -55,6 +58,9 @@ describe('bootstrapAdmin', () => {
         .from(admins)
         .where(eq(admins.email, TEST_EMAIL));
       expect(createdAdmin).toBeDefined();
+      if (!createdAdmin) {
+        throw new Error('Admin creation failed in test');
+      }
       expect(createdAdmin.name).toBe('테스트관리자');
       expect(createdAdmin.roleId).toBe(createdRole.id);
       await expect(verifyPassword('initial-password-123', createdAdmin.passwordHash)).resolves.toBe(
@@ -87,16 +93,22 @@ describe('bootstrapAdmin', () => {
           .from(roles)
           .where(eq(roles.id, existingRole.id));
         expect(restoredRole).toBeDefined();
-        expect(restoredRole.id).toBe(existingRole.id);
+        if (restoredRole) {
+          expect(restoredRole.id).toBe(existingRole.id);
 
-        const restoredAdminsCheck = await db
-          .select()
-          .from(admins)
-          .where(eq(admins.roleId, existingRole.id));
-        expect(restoredAdminsCheck).toHaveLength(existingAdmins.length);
-        for (let i = 0; i < existingAdmins.length; i++) {
-          expect(restoredAdminsCheck[i].id).toBe(existingAdmins[i].id);
-          expect(restoredAdminsCheck[i].email).toBe(existingAdmins[i].email);
+          const restoredAdminsCheck = await db
+            .select()
+            .from(admins)
+            .where(eq(admins.roleId, existingRole.id));
+          expect(restoredAdminsCheck).toHaveLength(existingAdmins.length);
+          for (let i = 0; i < existingAdmins.length; i++) {
+            const restoredAdmin = restoredAdminsCheck[i];
+            const expectedAdmin = existingAdmins[i];
+            if (restoredAdmin && expectedAdmin) {
+              expect(restoredAdmin.id).toBe(expectedAdmin.id);
+              expect(restoredAdmin.email).toBe(expectedAdmin.email);
+            }
+          }
         }
       }
     }

@@ -1,3 +1,4 @@
+import type { Response } from 'express';
 import { describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 import { parseBody } from './validate';
@@ -6,7 +7,7 @@ describe('parseBody', () => {
   const schema = z.object({ email: z.string().email(), age: z.number().int().min(0) });
 
   it('returns the parsed data when the body is valid', () => {
-    const res = { status: vi.fn().mockReturnThis(), json: vi.fn() } as never;
+    const res = { status: vi.fn().mockReturnThis(), json: vi.fn() } as unknown as Response;
     const result = parseBody(schema, { email: 'a@b.com', age: 5 }, res, 'req-1');
     expect(result).toEqual({ email: 'a@b.com', age: 5 });
     expect(res.status).not.toHaveBeenCalled();
@@ -15,7 +16,7 @@ describe('parseBody', () => {
   it('responds with a 400 VALIDATION_ERROR envelope and returns undefined on invalid input', () => {
     const json = vi.fn();
     const status = vi.fn().mockReturnValue({ json });
-    const res = { status } as never;
+    const res = { status } as unknown as Response;
 
     const result = parseBody(schema, { email: 'not-an-email', age: -1 }, res, 'req-2');
 

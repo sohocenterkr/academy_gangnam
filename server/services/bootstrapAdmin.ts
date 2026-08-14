@@ -39,6 +39,10 @@ export async function bootstrapAdmin(env: BootstrapEnv): Promise<void> {
         .returning()
     )[0];
 
+  if (!role) {
+    throw new Error('Failed to create or find the super-admin role during bootstrap.');
+  }
+
   const passwordHash = await hashPassword(env.INITIAL_ADMIN_PASSWORD);
 
   try {
