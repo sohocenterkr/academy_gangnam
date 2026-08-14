@@ -4,16 +4,28 @@ import { errorHandler } from './middleware/errorHandler';
 import { healthRouter } from './routes/health';
 import { createAuthRouter } from './routes/auth';
 import { loadEnv } from './env';
+import { createResendEmailAdapter } from './services/email';
 
-export function createApp(): Express {
+export interface AppOverrides {
+  emailAdapter?: import('./services/email').EmailAdapter;
+}
+
+export function createApp(overrides: AppOverrides = {}): Express {
   const env = loadEnv();
   const app = express();
+
+  const emailAdapter = overrides.emailAdapter ?? createResendEmailAdapter(env.RESEND_API_KEY, env.RESEND_FROM_EMAIL);
 
   app.use(requestId);
   app.use(express.json());
   app.use(
     '/api/auth',
-    createAuthRouter({ sessionSecret: env.AUTH_SESSION_SECRET, isProduction: env.NODE_ENV === 'production' })
+    createAuthRouter({
+      sessionSecret: env.AUTH_SESSION_SECRET,
+      isProduction: env.NODE_ENV === 'production',
+      emailAdapter,
+      appUrl: env.APP_URL ?? 'http://localhost:5173',
+    })
   );
   app.use('/api', healthRouter);
   app.use('/api', (req, res) => {

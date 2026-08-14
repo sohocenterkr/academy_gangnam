@@ -2,9 +2,10 @@ import { eq } from 'drizzle-orm';
 import { afterEach, describe, expect, it } from 'vitest';
 import request from 'supertest';
 import { db } from '../db';
-import { admins, authSessions, roles } from '@shared/schema';
+import { admins, authSessions, passwordResetTokens, roles } from '@shared/schema';
 import { hashPassword } from '../utils/password';
 import { createApp } from '../app';
+import { createFakeEmailAdapter } from '../services/email';
 
 const TEST_EMAIL = 'test-auth-route-admin@example.com';
 const TEST_PASSWORD = 'correct-password-123';
@@ -30,12 +31,14 @@ async function seedAdmin() {
   return { role, admin };
 }
 
-// Several tests below log in for real, which inserts an auth_sessions row — that row must be
-// deleted before the admin it references, or the admin delete fails on the foreign key.
+// Several tests below log in for real (which inserts an auth_sessions row) or request/complete a
+// password reset (which inserts a password_reset_tokens row) — those rows must be deleted before
+// the admin they reference, or the admin delete fails on the foreign key.
 async function cleanup() {
   const [admin] = await db.select().from(admins).where(eq(admins.email, TEST_EMAIL));
   if (admin) {
     await db.delete(authSessions).where(eq(authSessions.adminId, admin.id));
+    await db.delete(passwordResetTokens).where(eq(passwordResetTokens.adminId, admin.id));
   }
   await db.delete(admins).where(eq(admins.email, TEST_EMAIL));
   await db.delete(roles).where(eq(roles.name, 'test-auth-role'));
@@ -48,7 +51,7 @@ describe('auth routes', () => {
 
   it('logs in with correct credentials and sets a session cookie', async () => {
     await seedAdmin();
-    const app = createApp();
+    const app = createApp({ emailAdapter: createFakeEmailAdapter() });
 
     const response = await request(app).post('/api/auth/login').send({ email: TEST_EMAIL, password: TEST_PASSWORD });
 
@@ -59,7 +62,7 @@ describe('auth routes', () => {
 
   it('rejects an incorrect password with a generic message', async () => {
     await seedAdmin();
-    const app = createApp();
+    const app = createApp({ emailAdapter: createFakeEmailAdapter() });
 
     const response = await request(app)
       .post('/api/auth/login')
@@ -70,7 +73,7 @@ describe('auth routes', () => {
   });
 
   it('rejects a login for an email that does not exist with the same generic message', async () => {
-    const app = createApp();
+    const app = createApp({ emailAdapter: createFakeEmailAdapter() });
 
     const response = await request(app)
       .post('/api/auth/login')
@@ -81,14 +84,14 @@ describe('auth routes', () => {
   });
 
   it('GET /me returns 401 without a session cookie', async () => {
-    const app = createApp();
+    const app = createApp({ emailAdapter: createFakeEmailAdapter() });
     const response = await request(app).get('/api/auth/me');
     expect(response.status).toBe(401);
   });
 
   it('logs in, then GET /me returns the admin, then logout invalidates the session', async () => {
     await seedAdmin();
-    const app = createApp();
+    const app = createApp({ emailAdapter: createFakeEmailAdapter() });
 
     const loginResponse = await request(app)
       .post('/api/auth/login')
@@ -107,5 +110,54 @@ describe('auth routes', () => {
 
     const meAfterLogout = await request(app).get('/api/auth/me').set('Cookie', cookie);
     expect(meAfterLogout.status).toBe(401);
+  });
+});
+
+describe('forgot-password / reset-password', () => {
+  afterEach(async () => {
+    await cleanup();
+  });
+
+  it('always returns the same success message whether or not the email exists', async () => {
+    const fakeEmailAdapter = createFakeEmailAdapter();
+    const app = createApp({ emailAdapter: fakeEmailAdapter });
+
+    const knownResponse = await request(app)
+      .post('/api/auth/forgot-password')
+      .send({ email: 'no-such-admin@example.com' });
+    expect(knownResponse.status).toBe(200);
+    expect(fakeEmailAdapter.sentEmails).toHaveLength(0);
+  });
+
+  it('sends a reset email for an existing admin and the token successfully resets the password', async () => {
+    await seedAdmin();
+    const fakeEmailAdapter = createFakeEmailAdapter();
+    const app = createApp({ emailAdapter: fakeEmailAdapter });
+
+    await request(app).post('/api/auth/forgot-password').send({ email: TEST_EMAIL });
+    expect(fakeEmailAdapter.sentEmails).toHaveLength(1);
+    const [sent] = fakeEmailAdapter.sentEmails;
+    if (!sent) {
+      throw new Error('Expected an email to have been sent in test');
+    }
+    const token = new URL(sent.resetUrl).searchParams.get('token');
+
+    const resetResponse = await request(app)
+      .post('/api/auth/reset-password')
+      .send({ token, newPassword: 'a-brand-new-password-999' });
+    expect(resetResponse.status).toBe(200);
+
+    const loginResponse = await request(app)
+      .post('/api/auth/login')
+      .send({ email: TEST_EMAIL, password: 'a-brand-new-password-999' });
+    expect(loginResponse.status).toBe(200);
+  });
+
+  it('rejects an invalid reset token', async () => {
+    const app = createApp({ emailAdapter: createFakeEmailAdapter() });
+    const response = await request(app)
+      .post('/api/auth/reset-password')
+      .send({ token: 'not-a-real-token', newPassword: 'whatever-password-123' });
+    expect(response.status).toBe(400);
   });
 });

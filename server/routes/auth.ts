@@ -12,6 +12,8 @@ import { createSession, revokeSession } from '../services/session';
 import { hashToken } from '../utils/sessionToken';
 import { readSessionCookie } from '../utils/cookies';
 import { getNowKSTISOString } from '@shared/kst';
+import { requestPasswordReset, resetPassword } from '../services/passwordReset';
+import type { EmailAdapter } from '../services/email';
 
 const GENERIC_LOGIN_FAILURE = { code: 'UNAUTHENTICATED', message: '이메일 또는 비밀번호가 올바르지 않습니다.' };
 const MAX_FAILED_LOGINS = 5;
@@ -25,12 +27,17 @@ const loginSchema = z.object({
 export interface AuthRouterDeps {
   sessionSecret: string;
   isProduction: boolean;
+  emailAdapter: EmailAdapter;
+  appUrl: string;
 }
 
 export function createAuthRouter(deps: AuthRouterDeps): Router {
   const router = Router();
   const requireAuth = createRequireAuth(deps.sessionSecret);
   const loginLimiter = createRateLimiter({ limit: 10, windowMs: 15 * 60 * 1000 });
+  const forgotPasswordLimiter = createRateLimiter({ limit: 5, windowMs: 15 * 60 * 1000 });
+  const forgotPasswordSchema = z.object({ email: z.string().email() });
+  const resetPasswordSchema = z.object({ token: z.string().min(1), newPassword: z.string().min(8) });
 
   router.post('/login', async (req, res) => {
     if (!loginLimiter(req.ip ?? 'unknown')) {
@@ -99,6 +106,47 @@ export function createAuthRouter(deps: AuthRouterDeps): Router {
         name: req.admin!.name,
         role: { id: req.admin!.roleId, name: req.admin!.roleName, permissions: req.admin!.permissions },
       },
+      meta: { requestId: req.requestId, kstTimestamp: getNowKSTISOString() },
+    });
+  });
+
+  router.post('/forgot-password', async (req, res) => {
+    if (!forgotPasswordLimiter(req.ip ?? 'unknown')) {
+      res.status(429).json({
+        error: { code: 'RATE_LIMITED', message: '잠시 후 다시 시도해 주세요.', requestId: req.requestId },
+      });
+      return;
+    }
+
+    const parsed = parseBody(forgotPasswordSchema, req.body, res, req.requestId);
+    if (!parsed) return;
+
+    await requestPasswordReset(parsed.email, deps.appUrl, deps.emailAdapter, deps.sessionSecret);
+
+    res.json({
+      data: { message: '입력하신 이메일이 등록되어 있다면 재설정 안내를 보냈습니다.' },
+      meta: { requestId: req.requestId, kstTimestamp: getNowKSTISOString() },
+    });
+  });
+
+  router.post('/reset-password', async (req, res) => {
+    const parsed = parseBody(resetPasswordSchema, req.body, res, req.requestId);
+    if (!parsed) return;
+
+    const result = await resetPassword(parsed.token, parsed.newPassword, deps.sessionSecret);
+    if (!result.success) {
+      res.status(400).json({
+        error: {
+          code: 'INVALID_RESET_TOKEN',
+          message: '재설정 링크가 유효하지 않거나 만료되었습니다.',
+          requestId: req.requestId,
+        },
+      });
+      return;
+    }
+
+    res.json({
+      data: { success: true },
       meta: { requestId: req.requestId, kstTimestamp: getNowKSTISOString() },
     });
   });
