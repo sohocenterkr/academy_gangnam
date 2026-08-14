@@ -3,6 +3,8 @@ import { requestId } from './middleware/requestId';
 import { errorHandler } from './middleware/errorHandler';
 import { healthRouter } from './routes/health';
 import { createAuthRouter } from './routes/auth';
+import { createRolesRouter } from './routes/roles';
+import { createAdminsRouter } from './routes/admins';
 import { loadEnv } from './env';
 import { createResendEmailAdapter } from './services/email';
 
@@ -25,6 +27,15 @@ export function createApp(overrides: AppOverrides = {}): Express {
       isProduction: env.NODE_ENV === 'production',
       emailAdapter,
       appUrl: env.APP_URL ?? 'http://localhost:5173',
+    })
+  );
+  app.use('/api/roles', createRolesRouter({ sessionSecret: env.AUTH_SESSION_SECRET }));
+  app.use(
+    '/api/admins',
+    createAdminsRouter({
+      sessionSecret: env.AUTH_SESSION_SECRET,
+      appUrl: env.APP_URL ?? 'http://localhost:5173',
+      emailAdapter,
     })
   );
   app.use('/api', healthRouter);
