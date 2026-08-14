@@ -1,9 +1,16 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vitest/config';
+import { loadEnv } from 'vite';
 import react from '@vitejs/plugin-react';
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
+
+// Load repo-root .env into process.env so server-side tests (which call
+// loadEnv()/connect to the real dev DB via server/db.ts) work the same way
+// under plain `vitest run` as they do under the `dotenv -e .env --` npm
+// scripts.
+Object.assign(process.env, loadEnv(process.env.NODE_ENV ?? 'development', __dirname, ''));
 
 export default defineConfig({
   plugins: [react()],

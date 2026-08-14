@@ -2,7 +2,8 @@
   "extends": "./tsconfig.base.json",
   "compilerOptions": {
     "lib": ["ES2022"],
-    "types": ["node"]
+    "types": ["node"],
+    "paths": { "@shared/*": ["./shared/*"] }
   },
-  "include": ["*.config.ts", "tests/**/*.ts"]
+  "include": ["*.config.ts", "tests/**/*.ts", "scripts/**/*.ts", "shared/**/*.ts"]
 }
