@@ -1,7 +1,7 @@
 import { eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { db } from '../db';
-import { admins, roles } from '@shared/schema';
+import { admins, authSessions, passwordResetTokens, roles } from '@shared/schema';
 import { SUPER_ADMIN_ROLE_NAME } from '@shared/permissions';
 import { verifyPassword } from '../utils/password';
 import { bootstrapAdmin } from './bootstrapAdmin';
@@ -18,21 +18,47 @@ describe('bootstrapAdmin', () => {
       .where(eq(roles.name, SUPER_ADMIN_ROLE_NAME));
 
     let existingAdmins: typeof admins.$inferSelect[] = [];
+    // The real bootstrapped admin may already have history (auth sessions, password
+    // reset tokens) once it has been used for a real login — e.g. the e2e login test.
+    // Those rows reference admins.id with no cascade, so they must be captured and
+    // restored alongside the admin itself rather than left to block the delete below.
+    const existingAuthSessions: typeof authSessions.$inferSelect[] = [];
+    const existingPasswordResetTokens: typeof passwordResetTokens.$inferSelect[] = [];
     if (existingRole) {
       existingAdmins = await db
         .select()
         .from(admins)
         .where(eq(admins.roleId, existingRole.id));
+
+      for (const admin of existingAdmins) {
+        const sessions = await db
+          .select()
+          .from(authSessions)
+          .where(eq(authSessions.adminId, admin.id));
+        existingAuthSessions.push(...sessions);
+
+        const tokens = await db
+          .select()
+          .from(passwordResetTokens)
+          .where(eq(passwordResetTokens.adminId, admin.id));
+        existingPasswordResetTokens.push(...tokens);
+      }
     }
 
     try {
       // Step 2: Delete existing state to create a clean slate
       if (existingRole && existingAdmins.length > 0) {
-        // Delete admins first (respects FK)
+        // Delete rows that reference admins.id first (respects FK)
+        for (const session of existingAuthSessions) {
+          await db.delete(authSessions).where(eq(authSessions.id, session.id));
+        }
+        for (const token of existingPasswordResetTokens) {
+          await db.delete(passwordResetTokens).where(eq(passwordResetTokens.id, token.id));
+        }
+        // Then delete admins, then the role (respects FK)
         for (const admin of existingAdmins) {
           await db.delete(admins).where(eq(admins.id, admin.id));
         }
-        // Then delete the role
         await db.delete(roles).where(eq(roles.id, existingRole.id));
       }
 
@@ -68,13 +94,21 @@ describe('bootstrapAdmin', () => {
       );
     } finally {
       // Step 4: Restore original state
-      // Delete test data
-      await db.delete(admins).where(eq(admins.email, TEST_EMAIL));
+      // Delete test data (rows referencing the test admin first, then the admin/role)
       const [testCreatedRole] = await db
         .select()
         .from(roles)
         .where(eq(roles.name, SUPER_ADMIN_ROLE_NAME));
       if (testCreatedRole) {
+        const [testCreatedAdmin] = await db
+          .select()
+          .from(admins)
+          .where(eq(admins.email, TEST_EMAIL));
+        if (testCreatedAdmin) {
+          await db.delete(authSessions).where(eq(authSessions.adminId, testCreatedAdmin.id));
+          await db.delete(passwordResetTokens).where(eq(passwordResetTokens.adminId, testCreatedAdmin.id));
+        }
+        await db.delete(admins).where(eq(admins.email, TEST_EMAIL));
         await db.delete(roles).where(eq(roles.id, testCreatedRole.id));
       }
 
@@ -83,6 +117,12 @@ describe('bootstrapAdmin', () => {
         await db.insert(roles).values(existingRole);
         for (const admin of existingAdmins) {
           await db.insert(admins).values(admin);
+        }
+        for (const session of existingAuthSessions) {
+          await db.insert(authSessions).values(session);
+        }
+        for (const token of existingPasswordResetTokens) {
+          await db.insert(passwordResetTokens).values(token);
         }
       }
 
