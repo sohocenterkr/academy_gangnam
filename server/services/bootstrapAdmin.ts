@@ -11,11 +11,20 @@ interface BootstrapEnv {
   INITIAL_ADMIN_NAME: string;
 }
 
-export async function bootstrapAdmin(env: BootstrapEnv): Promise<void> {
+export interface BootstrapAdminOptions {
+  roleName?: string;
+}
+
+export async function bootstrapAdmin(
+  env: BootstrapEnv,
+  options: BootstrapAdminOptions = {},
+): Promise<void> {
+  const roleName = options.roleName ?? SUPER_ADMIN_ROLE_NAME;
+
   const [existingSuperAdminRole] = await db
     .select()
     .from(roles)
-    .where(eq(roles.name, SUPER_ADMIN_ROLE_NAME));
+    .where(eq(roles.name, roleName));
 
   if (existingSuperAdminRole) {
     const [existingAdmin] = await db
@@ -33,7 +42,7 @@ export async function bootstrapAdmin(env: BootstrapEnv): Promise<void> {
       await db
         .insert(roles)
         .values({
-          name: SUPER_ADMIN_ROLE_NAME,
+          name: roleName,
           permissions: [SUPER_ADMIN_WILDCARD_PERMISSION],
           isSystem: true,
         })

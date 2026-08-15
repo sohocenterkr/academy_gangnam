@@ -24,6 +24,23 @@ const updateSchoolSchema = z.object({
   expectedUpdatedAt: z.string(),
 });
 
+function isForeignKeyViolation(error: unknown): boolean {
+  // Same `.cause`-walking approach as isUniqueViolation below, but checking for
+  // Postgres error code 23503 (foreign_key_violation) instead of a constraint name,
+  // so genuine connection/timeout/other errors are never misreported as IN_USE.
+  let current: unknown = error;
+  while (current) {
+    if (current instanceof Error) {
+      const code = (current as { code?: unknown }).code;
+      if (code === '23503') return true;
+      current = current.cause;
+      continue;
+    }
+    break;
+  }
+  return false;
+}
+
 function isUniqueViolation(error: unknown, indexName: string): boolean {
   // drizzle-orm wraps the underlying pg error in a DrizzleQueryError whose own
   // `.message` is just "Failed query: ...\nparams: ..." — the real Postgres
@@ -188,7 +205,8 @@ export function createSchoolsRouter(deps: SchoolsRouterDeps): Router {
 
     try {
       await db.delete(schools).where(eq(schools.id, id));
-    } catch {
+    } catch (error) {
+      if (!isForeignKeyViolation(error)) throw error;
       res.status(409).json({
         error: {
           code: 'IN_USE',

@@ -23,4 +23,27 @@ describe('AdminHomePage', () => {
 
     await waitFor(() => expect(screen.getByText(/홍길동/)).toBeInTheDocument());
   });
+
+  it('links to the academy settings, academics settings, and profile pages', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          data: { id: '1', email: 'a@b.com', name: '홍길동', role: { id: 'r1', name: '최고관리자', permissions: ['*'] } },
+          meta: { requestId: 'req-1', kstTimestamp: '2026-08-15T00:30:00+09:00' },
+        }),
+      })
+    );
+
+    render(<AdminHomePage />);
+
+    await waitFor(() => expect(screen.getByRole('link', { name: '학원 기본정보' })).toBeInTheDocument());
+    expect(screen.getByRole('link', { name: '학원 기본정보' })).toHaveAttribute('href', '/admin/settings/academy');
+    expect(screen.getByRole('link', { name: '학교·학년 기준정보' })).toHaveAttribute(
+      'href',
+      '/admin/settings/academics'
+    );
+    expect(screen.getByRole('link', { name: '내 계정' })).toHaveAttribute('href', '/admin/profile');
+  });
 });

@@ -2,7 +2,7 @@ import { eq } from 'drizzle-orm';
 import { afterEach, describe, expect, it } from 'vitest';
 import request from 'supertest';
 import { db } from '../db';
-import { admins, roles, academySettings, authSessions, passwordResetTokens } from '@shared/schema';
+import { admins, roles, academySettings, auditLogs, authSessions, passwordResetTokens } from '@shared/schema';
 import { hashPassword } from '../utils/password';
 import { SUPER_ADMIN_WILDCARD_PERMISSION } from '@shared/permissions';
 import { createFakeEmailAdapter } from '../services/email';
@@ -43,12 +43,42 @@ async function cleanup() {
     where: eq(admins.email, SUPER_EMAIL),
   });
   if (adminToDelete) {
+    await db.delete(auditLogs).where(eq(auditLogs.adminId, adminToDelete.id));
     await db.delete(authSessions).where(eq(authSessions.adminId, adminToDelete.id));
     await db.delete(passwordResetTokens).where(eq(passwordResetTokens.adminId, adminToDelete.id));
     await db.update(academySettings).set({ updatedBy: null }).where(eq(academySettings.updatedBy, adminToDelete.id));
     await db.delete(admins).where(eq(admins.id, adminToDelete.id));
   }
   await db.delete(roles).where(eq(roles.name, 'test-academy-settings-role'));
+}
+
+// The `academy_settings` table is a real singleton row shared with the actual dev
+// environment (there is no per-test isolated DB). Any test that PATCHes it must
+// snapshot the row's exact content beforehand and restore it afterward, the same
+// way this codebase preserves other real/shared rows in tests.
+type AcademySettingsRow = typeof academySettings.$inferSelect;
+
+async function snapshotAcademySettings(): Promise<AcademySettingsRow | undefined> {
+  const [existing] = await db.select().from(academySettings).limit(1);
+  return existing;
+}
+
+async function restoreAcademySettings(snapshot: AcademySettingsRow | undefined): Promise<void> {
+  if (!snapshot) return;
+  await db
+    .update(academySettings)
+    .set({
+      academyName: snapshot.academyName,
+      phoneNormalized: snapshot.phoneNormalized,
+      address: snapshot.address,
+      senderName: snapshot.senderName,
+      logoMediaId: snapshot.logoMediaId,
+      brandColors: snapshot.brandColors,
+      brandFonts: snapshot.brandFonts,
+      updatedBy: snapshot.updatedBy,
+      updatedAt: snapshot.updatedAt,
+    })
+    .where(eq(academySettings.id, snapshot.id));
 }
 
 describe('academy settings routes', () => {
@@ -84,17 +114,48 @@ describe('academy settings routes', () => {
     const app = createApp({ emailAdapter: createFakeEmailAdapter() });
     const cookie = await loginAs(app, SUPER_EMAIL);
 
-    await request(app).get('/api/settings/academy').set('Cookie', cookie);
+    const before = await request(app).get('/api/settings/academy').set('Cookie', cookie);
+    const snapshot = await snapshotAcademySettings();
 
-    const patchResponse = await request(app)
-      .patch('/api/settings/academy')
-      .set('Cookie', cookie)
-      .send({ academyName: '강남 학원', phoneNormalized: '0212345678' });
-    expect(patchResponse.status).toBe(200);
-    expect(patchResponse.body.data.academyName).toBe('강남 학원');
+    try {
+      const patchResponse = await request(app)
+        .patch('/api/settings/academy')
+        .set('Cookie', cookie)
+        .send({
+          academyName: '강남 학원',
+          phoneNormalized: '0212345678',
+          expectedUpdatedAt: before.body.data.updatedAt,
+        });
+      expect(patchResponse.status).toBe(200);
+      expect(patchResponse.body.data.academyName).toBe('강남 학원');
 
-    const getResponse = await request(app).get('/api/settings/academy').set('Cookie', cookie);
-    expect(getResponse.body.data.academyName).toBe('강남 학원');
-    expect(getResponse.body.data.phoneNormalized).toBe('0212345678');
+      const getResponse = await request(app).get('/api/settings/academy').set('Cookie', cookie);
+      expect(getResponse.body.data.academyName).toBe('강남 학원');
+      expect(getResponse.body.data.phoneNormalized).toBe('0212345678');
+    } finally {
+      await restoreAcademySettings(snapshot);
+    }
+  });
+
+  it('rejects a PATCH with a stale expectedUpdatedAt with 409 VERSION_CONFLICT', async () => {
+    await seedSuperAdmin();
+    const app = createApp({ emailAdapter: createFakeEmailAdapter() });
+    const cookie = await loginAs(app, SUPER_EMAIL);
+
+    const before = await request(app).get('/api/settings/academy').set('Cookie', cookie);
+    const snapshot = await snapshotAcademySettings();
+
+    try {
+      const staleTimestamp = new Date(Date.parse(before.body.data.updatedAt) - 1000).toISOString();
+      const patchResponse = await request(app)
+        .patch('/api/settings/academy')
+        .set('Cookie', cookie)
+        .send({ academyName: '다른 이름', expectedUpdatedAt: staleTimestamp });
+
+      expect(patchResponse.status).toBe(409);
+      expect(patchResponse.body.error.code).toBe('VERSION_CONFLICT');
+    } finally {
+      await restoreAcademySettings(snapshot);
+    }
   });
 });

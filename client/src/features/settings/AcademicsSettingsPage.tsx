@@ -70,6 +70,7 @@ export function AcademicsSettingsPage() {
   }
 
   async function handleDeleteSchool(school: School) {
+    if (!window.confirm('정말 삭제하시겠습니까?')) return;
     setError(null);
     try {
       await apiDelete(`/api/schools/${school.id}`);
@@ -105,6 +106,7 @@ export function AcademicsSettingsPage() {
   }
 
   async function handleDeleteGradeLevel(gradeLevel: GradeLevel) {
+    if (!window.confirm('정말 삭제하시겠습니까?')) return;
     setError(null);
     try {
       await apiDelete(`/api/grade-levels/${gradeLevel.id}`);
