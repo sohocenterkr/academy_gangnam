@@ -6,6 +6,7 @@ import { ProfilePage } from './features/settings/ProfilePage';
 import { AcademySettingsPage } from './features/settings/AcademySettingsPage';
 import { AcademicsSettingsPage } from './features/settings/AcademicsSettingsPage';
 import { GuardianListPage } from './features/guardians/GuardianListPage';
+import { GuardianDetailPage } from './features/guardians/GuardianDetailPage';
 import { ProtectedRoute } from './components/layout/ProtectedRoute';
 
 export function AppRoutes() {
@@ -36,6 +37,11 @@ export function AppRoutes() {
       <Route path="/admin/guardians">
         <ProtectedRoute>
           <GuardianListPage />
+        </ProtectedRoute>
+      </Route>
+      <Route path="/admin/guardians/:guardianId">
+        <ProtectedRoute>
+          <GuardianDetailPage />
         </ProtectedRoute>
       </Route>
     </Switch>
