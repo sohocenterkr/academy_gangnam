@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 
-test('logs in, creates a student, links a guardian, and confirms a duplicate-phone warning', async ({ page }) => {
+test('logs in, creates a student, links and unlinks a guardian, and confirms a duplicate-phone warning', async ({ page }) => {
   const email = process.env.INITIAL_ADMIN_EMAIL;
   const password = process.env.INITIAL_ADMIN_PASSWORD;
   if (!email || !password) {
@@ -39,10 +39,34 @@ test('logs in, creates a student, links a guardian, and confirms a duplicate-pho
   await page.getByRole('link', { name: maskedName }).click();
   await expect(page).toHaveURL(/\/admin\/students\/.+/);
   await expect(page.getByLabel('이름')).toHaveValue(studentName);
+  const studentDetailUrl = page.url();
 
+  // Create a real guardian to link, then come back to the student detail page.
+  await page.goto('/admin/guardians');
   const guardianName = `e2e보호자${Date.now()}`;
+  const guardianPhone = `010${Date.now().toString().slice(-8)}`;
+  await page.getByLabel('이름').fill(guardianName);
+  await page.getByLabel('전화번호').fill(guardianPhone);
+  await page.getByRole('button', { name: '보호자 등록' }).click();
+  const maskedGuardianName = `${Array.from(guardianName)[0]}${'*'.repeat(Array.from(guardianName).length - 2)}${Array.from(guardianName)[Array.from(guardianName).length - 1]}`;
+  await expect(page.getByText(maskedGuardianName)).toBeVisible();
+
+  await page.goto(studentDetailUrl);
   await page.getByLabel('보호자 검색').fill(guardianName);
   await page.getByRole('button', { name: '보호자 검색' }).click();
+
+  // The search-results panel reuses the general GET /api/guardians list endpoint, which
+  // masks names, while the "연결된 보호자" section below embeds the full guardian record
+  // from the student-detail response (unmasked) — so these two rows use different names.
+  const searchResultRow = page.locator('li', { hasText: maskedGuardianName }).filter({ has: page.getByRole('button', { name: '연결', exact: true }) });
+  await expect(searchResultRow).toBeVisible();
+  await searchResultRow.getByRole('button', { name: '연결', exact: true }).click();
+
+  const linkedRow = page.locator('li', { hasText: guardianName }).filter({ has: page.getByRole('button', { name: '연결 해제' }) });
+  await expect(linkedRow).toBeVisible();
+
+  await linkedRow.getByRole('button', { name: '연결 해제' }).click();
+  await expect(page.locator('li', { hasText: guardianName }).filter({ has: page.getByRole('button', { name: '연결 해제' }) })).not.toBeVisible();
 
   await page.getByRole('link', { name: '목록으로' }).click();
   await expect(page).toHaveURL(/\/admin\/students$/);
