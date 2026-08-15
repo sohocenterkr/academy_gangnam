@@ -1,1 +1,1 @@
-export * from '../../../shared/masking';
+export * from '@shared/masking';

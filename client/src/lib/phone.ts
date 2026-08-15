@@ -1,1 +1,1 @@
-export * from '../../../shared/phone';
+export * from '@shared/phone';
