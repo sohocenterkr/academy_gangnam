@@ -226,3 +226,71 @@ describe('students routes — detail and update', () => {
     expect(attempt.body.data.status).toBe('duplicate_warning');
   });
 });
+
+describe('students routes — status, delete, restore', () => {
+  afterEach(async () => {
+    await cleanup();
+  });
+
+  it('changes status and records the effective date', async () => {
+    const { gradeLevelId } = await seedSuperAdminAndGrade();
+    const app = createApp({ emailAdapter: createFakeEmailAdapter() });
+    const cookie = await loginAs(app, SUPER_EMAIL);
+
+    const created = await request(app)
+      .post('/api/students')
+      .set('Cookie', cookie)
+      .send({ name: TEST_STUDENT_NAME, phone: TEST_STUDENT_PHONE, gradeLevelId });
+
+    const response = await request(app)
+      .post(`/api/students/${created.body.data.student.id}/status`)
+      .set('Cookie', cookie)
+      .send({ status: 'paused', effectiveDate: '2026-09-01' });
+
+    expect(response.status).toBe(200);
+    expect(response.body.data.student.status).toBe('paused');
+    expect(response.body.data.student.statusEffectiveDate).toBe('2026-09-01');
+  });
+
+  it('rejects an invalid status value', async () => {
+    const { gradeLevelId } = await seedSuperAdminAndGrade();
+    const app = createApp({ emailAdapter: createFakeEmailAdapter() });
+    const cookie = await loginAs(app, SUPER_EMAIL);
+
+    const created = await request(app)
+      .post('/api/students')
+      .set('Cookie', cookie)
+      .send({ name: TEST_STUDENT_NAME, phone: TEST_STUDENT_PHONE, gradeLevelId });
+
+    const response = await request(app)
+      .post(`/api/students/${created.body.data.student.id}/status`)
+      .set('Cookie', cookie)
+      .send({ status: 'not-a-real-status' });
+
+    expect(response.status).toBe(400);
+  });
+
+  it('soft-deletes and restores a student', async () => {
+    const { gradeLevelId } = await seedSuperAdminAndGrade();
+    const app = createApp({ emailAdapter: createFakeEmailAdapter() });
+    const cookie = await loginAs(app, SUPER_EMAIL);
+
+    const created = await request(app)
+      .post('/api/students')
+      .set('Cookie', cookie)
+      .send({ name: TEST_STUDENT_NAME, phone: TEST_STUDENT_PHONE, gradeLevelId });
+    const studentId = created.body.data.student.id;
+
+    const deleted = await request(app).delete(`/api/students/${studentId}`).set('Cookie', cookie);
+    expect(deleted.status).toBe(200);
+
+    const afterDelete = await request(app).get(`/api/students/${studentId}`).set('Cookie', cookie);
+    expect(afterDelete.status).toBe(404);
+
+    const restored = await request(app).post(`/api/students/${studentId}/restore`).set('Cookie', cookie);
+    expect(restored.status).toBe(200);
+
+    const afterRestore = await request(app).get(`/api/students/${studentId}`).set('Cookie', cookie);
+    expect(afterRestore.status).toBe(200);
+  });
+});

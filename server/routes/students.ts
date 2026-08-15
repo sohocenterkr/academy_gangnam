@@ -46,6 +46,12 @@ const updateStudentSchema = z.object({
   expectedUpdatedAt: z.string(),
 });
 
+const statusChangeSchema = z.object({
+  status: z.enum(STATUS_VALUES),
+  effectiveDate: z.string().optional(),
+  reason: z.string().optional(),
+});
+
 function toMaskedStudent(student: typeof students.$inferSelect) {
   return {
     id: student.id,
@@ -345,6 +351,116 @@ export function createStudentsRouter(deps: StudentsRouterDeps): Router {
       data: { status: 'updated', student: updated },
       meta: { requestId: req.requestId, kstTimestamp: getNowKSTISOString() },
     });
+  });
+
+  router.post('/:id/status', requireAuth, requireStudentsManage, async (req, res) => {
+    const id = req.params.id;
+    if (!id || Array.isArray(id)) {
+      res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: '잘못된 요청입니다.', requestId: req.requestId } });
+      return;
+    }
+
+    const parsed = parseBody(statusChangeSchema, req.body, res, req.requestId);
+    if (!parsed) return;
+
+    const [before] = await db.select().from(students).where(eq(students.id, id));
+    if (!before || before.deletedAt) {
+      res.status(404).json({ error: { code: 'NOT_FOUND', message: '학생을 찾을 수 없습니다.', requestId: req.requestId } });
+      return;
+    }
+
+    const statusEffectiveDate = parsed.effectiveDate ?? getTodayKST();
+
+    const [updated] = await db
+      .update(students)
+      .set({ status: parsed.status, statusEffectiveDate, updatedBy: req.admin!.id, updatedAt: new Date() })
+      .where(eq(students.id, id))
+      .returning();
+    if (!updated) {
+      res.status(500).json({ error: { code: 'INTERNAL_ERROR', message: '상태를 변경하지 못했습니다.', requestId: req.requestId } });
+      return;
+    }
+
+    await writeAuditLog({
+      adminId: req.admin!.id,
+      roleSnapshot: req.admin!.roleName,
+      action: 'student.status_change',
+      targetType: 'student',
+      targetId: updated.id,
+      beforeDataSafe: { status: before.status, statusEffectiveDate: before.statusEffectiveDate },
+      afterDataSafe: { status: updated.status, statusEffectiveDate: updated.statusEffectiveDate, reason: parsed.reason },
+      result: 'success',
+      requestId: req.requestId,
+    });
+
+    res.json({
+      data: { status: 'updated', student: updated },
+      meta: { requestId: req.requestId, kstTimestamp: getNowKSTISOString() },
+    });
+  });
+
+  router.delete('/:id', requireAuth, requireStudentsManage, async (req, res) => {
+    const id = req.params.id;
+    if (!id || Array.isArray(id)) {
+      res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: '잘못된 요청입니다.', requestId: req.requestId } });
+      return;
+    }
+
+    const [existing] = await db.select().from(students).where(eq(students.id, id));
+    if (!existing || existing.deletedAt) {
+      res.status(404).json({ error: { code: 'NOT_FOUND', message: '학생을 찾을 수 없습니다.', requestId: req.requestId } });
+      return;
+    }
+
+    await db.update(students).set({ deletedAt: new Date(), updatedBy: req.admin!.id, updatedAt: new Date() }).where(eq(students.id, id));
+
+    await writeAuditLog({
+      adminId: req.admin!.id,
+      roleSnapshot: req.admin!.roleName,
+      action: 'student.delete',
+      targetType: 'student',
+      targetId: id,
+      beforeDataSafe: { name: existing.name },
+      afterDataSafe: null,
+      result: 'success',
+      requestId: req.requestId,
+    });
+
+    res.json({ data: { success: true }, meta: { requestId: req.requestId, kstTimestamp: getNowKSTISOString() } });
+  });
+
+  router.post('/:id/restore', requireAuth, requireStudentsManage, async (req, res) => {
+    const id = req.params.id;
+    if (!id || Array.isArray(id)) {
+      res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: '잘못된 요청입니다.', requestId: req.requestId } });
+      return;
+    }
+
+    const [existing] = await db.select().from(students).where(eq(students.id, id));
+    if (!existing || !existing.deletedAt) {
+      res.status(404).json({ error: { code: 'NOT_FOUND', message: '학생을 찾을 수 없습니다.', requestId: req.requestId } });
+      return;
+    }
+
+    const [restored] = await db
+      .update(students)
+      .set({ deletedAt: null, updatedBy: req.admin!.id, updatedAt: new Date() })
+      .where(eq(students.id, id))
+      .returning();
+
+    await writeAuditLog({
+      adminId: req.admin!.id,
+      roleSnapshot: req.admin!.roleName,
+      action: 'student.restore',
+      targetType: 'student',
+      targetId: id,
+      beforeDataSafe: null,
+      afterDataSafe: { name: existing.name },
+      result: 'success',
+      requestId: req.requestId,
+    });
+
+    res.json({ data: restored, meta: { requestId: req.requestId, kstTimestamp: getNowKSTISOString() } });
   });
 
   return router;
