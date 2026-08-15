@@ -6,6 +6,7 @@ import { createAuthRouter } from './routes/auth';
 import { createRolesRouter } from './routes/roles';
 import { createAdminsRouter } from './routes/admins';
 import { createAcademySettingsRouter } from './routes/academySettings';
+import { createSchoolsRouter } from './routes/schools';
 import { loadEnv } from './env';
 import { createResendEmailAdapter } from './services/email';
 
@@ -40,6 +41,7 @@ export function createApp(overrides: AppOverrides = {}): Express {
     })
   );
   app.use('/api/settings/academy', createAcademySettingsRouter({ sessionSecret: env.AUTH_SESSION_SECRET }));
+  app.use('/api/schools', createSchoolsRouter({ sessionSecret: env.AUTH_SESSION_SECRET }));
   app.use('/api', healthRouter);
   app.use('/api', (req, res) => {
     res.status(404).json({
