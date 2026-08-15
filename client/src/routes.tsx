@@ -8,6 +8,7 @@ import { AcademicsSettingsPage } from './features/settings/AcademicsSettingsPage
 import { GuardianListPage } from './features/guardians/GuardianListPage';
 import { GuardianDetailPage } from './features/guardians/GuardianDetailPage';
 import { StudentListPage } from './features/students/StudentListPage';
+import { StudentDetailPage } from './features/students/StudentDetailPage';
 import { ProtectedRoute } from './components/layout/ProtectedRoute';
 
 export function AppRoutes() {
@@ -48,6 +49,11 @@ export function AppRoutes() {
       <Route path="/admin/students">
         <ProtectedRoute>
           <StudentListPage />
+        </ProtectedRoute>
+      </Route>
+      <Route path="/admin/students/:studentId">
+        <ProtectedRoute>
+          <StudentDetailPage />
         </ProtectedRoute>
       </Route>
     </Switch>
