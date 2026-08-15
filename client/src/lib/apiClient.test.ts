@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { apiGet, apiPost, ApiRequestError } from './apiClient';
+import { apiDelete, apiGet, apiPatch, apiPost, ApiRequestError } from './apiClient';
 
 describe('apiGet', () => {
   afterEach(() => {
@@ -117,5 +117,82 @@ describe('apiPost', () => {
     );
 
     await expect(apiPost('/api/auth/login', {})).rejects.toBeInstanceOf(ApiRequestError);
+  });
+});
+
+describe('apiPatch', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('sends a JSON body via PATCH and returns the data payload on success', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        data: { id: '1', name: 'updated' },
+        meta: { requestId: 'req-1', kstTimestamp: '2026-08-15T00:30:00+09:00' },
+      }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(apiPatch('/api/schools/1', { name: 'updated' })).resolves.toEqual({
+      id: '1',
+      name: 'updated',
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/schools/1',
+      expect.objectContaining({ method: 'PATCH', body: JSON.stringify({ name: 'updated' }) })
+    );
+  });
+
+  it('throws ApiRequestError with the server-provided code and message on failure', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: false,
+        json: async () => ({
+          error: { code: 'VERSION_CONFLICT', message: '다른 곳에서 이미 변경되었습니다.', requestId: 'req-2' },
+        }),
+      })
+    );
+
+    await expect(apiPatch('/api/schools/1', {})).rejects.toBeInstanceOf(ApiRequestError);
+  });
+});
+
+describe('apiDelete', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('sends a DELETE request and returns the data payload on success', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        data: { success: true },
+        meta: { requestId: 'req-1', kstTimestamp: '2026-08-15T00:30:00+09:00' },
+      }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(apiDelete('/api/schools/1')).resolves.toEqual({ success: true });
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/schools/1',
+      expect.objectContaining({ method: 'DELETE' })
+    );
+  });
+
+  it('throws ApiRequestError with the server-provided code and message on failure', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: false,
+        json: async () => ({
+          error: { code: 'IN_USE', message: '사용 중입니다.', requestId: 'req-2' },
+        }),
+      })
+    );
+
+    await expect(apiDelete('/api/schools/1')).rejects.toBeInstanceOf(ApiRequestError);
   });
 });

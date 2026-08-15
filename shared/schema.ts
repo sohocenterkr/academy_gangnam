@@ -1,3 +1,4 @@
+import { sql } from 'drizzle-orm';
 import { boolean, integer, jsonb, pgTable, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
 
 export const roles = pgTable('roles', {
@@ -75,3 +76,55 @@ export const auditLogs = pgTable('audit_logs', {
   requestId: text('request_id').notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });
+
+export const academySettings = pgTable('academy_settings', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  academyName: text('academy_name').notNull(),
+  phoneNormalized: text('phone_normalized'),
+  address: text('address'),
+  senderName: text('sender_name'),
+  logoMediaId: text('logo_media_id'),
+  brandColors: jsonb('brand_colors'),
+  brandFonts: jsonb('brand_fonts'),
+  updatedBy: uuid('updated_by').references(() => admins.id),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const schools = pgTable(
+  'schools',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    name: text('name').notNull(),
+    region: text('region'),
+    sortOrder: integer('sort_order').notNull().default(0),
+    isActive: boolean('is_active').notNull().default(true),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+    createdBy: uuid('created_by').references(() => admins.id),
+    updatedBy: uuid('updated_by').references(() => admins.id),
+  },
+  (table) => [
+    uniqueIndex('schools_active_name_unique')
+      .on(table.name)
+      .where(sql`${table.isActive} = true`),
+  ]
+);
+
+export const gradeLevels = pgTable(
+  'grade_levels',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    name: text('name').notNull(),
+    sortOrder: integer('sort_order').notNull().default(0),
+    isActive: boolean('is_active').notNull().default(true),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+    createdBy: uuid('created_by').references(() => admins.id),
+    updatedBy: uuid('updated_by').references(() => admins.id),
+  },
+  (table) => [
+    uniqueIndex('grade_levels_active_name_unique')
+      .on(table.name)
+      .where(sql`${table.isActive} = true`),
+  ]
+);
