@@ -1,4 +1,4 @@
-import { and, eq } from 'drizzle-orm';
+import { and, eq, ilike } from 'drizzle-orm';
 import { afterEach, describe, expect, it } from 'vitest';
 import request from 'supertest';
 import { db } from '../db';
@@ -37,6 +37,10 @@ async function loginAs(app: ReturnType<typeof createApp>, email: string): Promis
 async function cleanup() {
   await db.delete(guardians).where(eq(guardians.name, TEST_GUARDIAN_NAME));
   await db.delete(guardians).where(eq(guardians.phoneNormalized, TEST_GUARDIAN_PHONE));
+  // Catches any other test-created guardian by naming convention (e.g. the second guardian in the
+  // duplicate-phone-warning tests), regardless of which test created it or whether that test's own
+  // assertions failed before reaching its explicit inline delete.
+  await db.delete(guardians).where(ilike(guardians.name, 'test-guardian-%'));
 
   const adminToDelete = await db.query.admins.findFirst({
     where: eq(admins.email, SUPER_EMAIL),
