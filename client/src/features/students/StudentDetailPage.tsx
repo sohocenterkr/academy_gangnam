@@ -92,6 +92,7 @@ export function StudentDetailPage() {
   async function submitUpdate(confirmDuplicate: boolean) {
     if (!student) return;
     setError(null);
+    setSaved(false);
     try {
       const response = await apiPatch<UpdateStudentResponse>(`/api/students/${student.id}`, {
         name,

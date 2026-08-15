@@ -11,6 +11,7 @@ import { parseBody } from '../utils/validate';
 import { createRequireAuth } from '../middleware/auth';
 import { createRequirePermission } from '../middleware/permissions';
 import { writeAuditLog } from '../services/audit';
+import { unsetOtherPrimaryGuardians } from '../utils/studentGuardians';
 
 const STATUS_VALUES = ['enrolled', 'paused', 'withdrawn', 'graduated'] as const;
 
@@ -25,9 +26,9 @@ const createStudentSchema = z.object({
   phone: z.string().min(1),
   gradeLevelId: z.string().min(1),
   schoolId: z.string().optional(),
-  birthDate: z.string().optional(),
+  birthDate: z.iso.date().optional(),
   address: z.string().optional(),
-  registrationDate: z.string().optional(),
+  registrationDate: z.iso.date().optional(),
   specialNotes: z.string().optional(),
   counselingNotes: z.string().optional(),
   confirmDuplicate: z.boolean().optional(),
@@ -38,7 +39,7 @@ const updateStudentSchema = z.object({
   phone: z.string().min(1).optional(),
   gradeLevelId: z.string().min(1).optional(),
   schoolId: z.string().optional(),
-  birthDate: z.string().optional(),
+  birthDate: z.iso.date().optional(),
   address: z.string().optional(),
   specialNotes: z.string().optional(),
   counselingNotes: z.string().optional(),
@@ -48,7 +49,7 @@ const updateStudentSchema = z.object({
 
 const statusChangeSchema = z.object({
   status: z.enum(STATUS_VALUES),
-  effectiveDate: z.string().optional(),
+  effectiveDate: z.iso.date().optional(),
   reason: z.string().optional(),
 });
 
@@ -261,7 +262,7 @@ export function createStudentsRouter(deps: StudentsRouterDeps): Router {
       })
       .from(studentGuardians)
       .innerJoin(guardians, eq(studentGuardians.guardianId, guardians.id))
-      .where(eq(studentGuardians.studentId, id));
+      .where(and(eq(studentGuardians.studentId, id), isNull(guardians.deletedAt)));
 
     res.json({
       data: { ...student, guardians: links },
@@ -511,7 +512,7 @@ export function createStudentsRouter(deps: StudentsRouterDeps): Router {
     try {
       created = await db.transaction(async (tx) => {
         if (parsed.isPrimary) {
-          await tx.update(studentGuardians).set({ isPrimary: false, updatedAt: new Date() }).where(eq(studentGuardians.studentId, id));
+          await unsetOtherPrimaryGuardians(tx, id);
         }
         const [row] = await tx
           .insert(studentGuardians)
@@ -527,6 +528,12 @@ export function createStudentsRouter(deps: StudentsRouterDeps): Router {
         return row;
       });
     } catch (error) {
+      if (isUniqueViolation(error, 'student_guardians_primary_unique')) {
+        res.status(409).json({
+          error: { code: 'VALIDATION_ERROR', message: '이미 다른 보호자가 대표로 지정되어 있습니다. 새로고침 후 다시 시도해 주세요.', requestId: req.requestId },
+        });
+        return;
+      }
       if (isUniqueViolation(error, 'student_guardians_student_guardian_unique')) {
         res.status(409).json({
           error: { code: 'DUPLICATE_LINK', message: '이미 연결된 보호자입니다.', requestId: req.requestId },

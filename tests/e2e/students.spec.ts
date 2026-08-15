@@ -1,4 +1,7 @@
 import { test, expect } from '@playwright/test';
+import { eq } from 'drizzle-orm';
+import { db } from '../../server/db';
+import { gradeLevels, students } from '../../shared/schema';
 
 test('logs in, creates a student, links and unlinks a guardian, and confirms a duplicate-phone warning', async ({ page }) => {
   const email = process.env.INITIAL_ADMIN_EMAIL;
@@ -41,6 +44,9 @@ test('logs in, creates a student, links and unlinks a guardian, and confirms a d
   await expect(page.getByLabel('이름')).toHaveValue(studentName);
   const studentDetailUrl = page.url();
 
+  // Registered once here so it covers the student-delete confirm dialog further down.
+  page.on('dialog', (dialog) => dialog.accept());
+
   // Create a real guardian to link, then come back to the student detail page.
   await page.goto('/admin/guardians');
   const guardianName = `e2e보호자${Date.now()}`;
@@ -71,6 +77,9 @@ test('logs in, creates a student, links and unlinks a guardian, and confirms a d
   await page.getByRole('link', { name: '목록으로' }).click();
   await expect(page).toHaveURL(/\/admin\/students$/);
 
+  // The duplicate-phone check only looks at non-deleted students, so it must run while the
+  // first student (created above with `studentPhone`) is still active — this has to happen
+  // before the student-delete step further down.
   const secondStudentName = `e2e학생2-${Date.now()}`;
   await page.getByLabel('이름').fill(secondStudentName);
   await page.getByLabel('전화번호').fill(studentPhone);
@@ -79,8 +88,24 @@ test('logs in, creates a student, links and unlinks a guardian, and confirms a d
 
   await expect(page.getByText(/이미 등록된 전화번호/)).toBeVisible();
 
-  await page.goto('/admin/settings/academics');
-  page.on('dialog', (dialog) => dialog.accept());
-  const gradeRow = page.locator('li', { hasText: gradeName });
-  await gradeRow.getByRole('button', { name: '삭제' }).click();
+  // Exercise the "학생 삭제" UI flow (soft delete) on the first student.
+  await page.goto(studentDetailUrl);
+  await page.getByRole('button', { name: '학생 삭제' }).click();
+  await expect(page).toHaveURL(/\/admin\/students$/);
+
+  // NOTE on cleanup below: `students.gradeLevelId` is a NOT NULL foreign key with no cascade,
+  // and this project's soft-delete model (`deleted_at`) intentionally keeps deleted rows in
+  // place for history — so the "학생 삭제" click above never frees this grade level's FK, and
+  // `DELETE /api/grade-levels/:id` would keep returning 409 IN_USE no matter when it's called.
+  // There's no soft-delete-preserving UI/API path that frees a NOT-NULL FK, so — the same way
+  // this project's own vitest integration tests reach into the DB directly to clean up their
+  // fixture rows (see server/routes/students.test.ts's cleanup() helper) — this test deletes
+  // its own zero-history fixture rows (the grade level and the one student that referenced it)
+  // directly via the DB once the UI assertions above are done, instead of leaking them into the
+  // shared dev DB on every run.
+  const [gradeRow] = await db.select({ id: gradeLevels.id }).from(gradeLevels).where(eq(gradeLevels.name, gradeName));
+  if (gradeRow) {
+    await db.delete(students).where(eq(students.gradeLevelId, gradeRow.id));
+    await db.delete(gradeLevels).where(eq(gradeLevels.id, gradeRow.id));
+  }
 });

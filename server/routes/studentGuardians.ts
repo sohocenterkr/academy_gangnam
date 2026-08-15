@@ -9,6 +9,7 @@ import { parseBody } from '../utils/validate';
 import { createRequireAuth } from '../middleware/auth';
 import { createRequirePermission } from '../middleware/permissions';
 import { writeAuditLog } from '../services/audit';
+import { unsetOtherPrimaryGuardians } from '../utils/studentGuardians';
 
 const updateLinkSchema = z.object({
   relationship: z.string().optional(),
@@ -17,6 +18,21 @@ const updateLinkSchema = z.object({
   useForCheckin: z.boolean().optional(),
   expectedUpdatedAt: z.string(),
 });
+
+function isUniqueViolation(error: unknown, indexName: string): boolean {
+  let current: unknown = error;
+  while (current) {
+    if (current instanceof Error) {
+      if (current.message.includes(indexName)) return true;
+      const constraint = (current as { constraint?: unknown }).constraint;
+      if (typeof constraint === 'string' && constraint.includes(indexName)) return true;
+      current = current.cause;
+      continue;
+    }
+    break;
+  }
+  return false;
+}
 
 export interface StudentGuardiansRouterDeps {
   sessionSecret: string;
@@ -51,20 +67,28 @@ export function createStudentGuardiansRouter(deps: StudentGuardiansRouterDeps): 
 
     const { expectedUpdatedAt: _expected, ...changes } = parsed;
 
-    const updated = await db.transaction(async (tx) => {
-      if (changes.isPrimary) {
-        await tx
+    let updated;
+    try {
+      updated = await db.transaction(async (tx) => {
+        if (changes.isPrimary) {
+          await unsetOtherPrimaryGuardians(tx, before.studentId);
+        }
+        const [row] = await tx
           .update(studentGuardians)
-          .set({ isPrimary: false, updatedAt: new Date() })
-          .where(eq(studentGuardians.studentId, before.studentId));
+          .set({ ...changes, updatedAt: new Date() })
+          .where(eq(studentGuardians.id, id))
+          .returning();
+        return row;
+      });
+    } catch (error) {
+      if (isUniqueViolation(error, 'student_guardians_primary_unique')) {
+        res.status(409).json({
+          error: { code: 'VALIDATION_ERROR', message: '이미 다른 보호자가 대표로 지정되어 있습니다. 새로고침 후 다시 시도해 주세요.', requestId: req.requestId },
+        });
+        return;
       }
-      const [row] = await tx
-        .update(studentGuardians)
-        .set({ ...changes, updatedAt: new Date() })
-        .where(eq(studentGuardians.id, id))
-        .returning();
-      return row;
-    });
+      throw error;
+    }
     if (!updated) {
       res.status(500).json({ error: { code: 'INTERNAL_ERROR', message: '수정하지 못했습니다.', requestId: req.requestId } });
       return;

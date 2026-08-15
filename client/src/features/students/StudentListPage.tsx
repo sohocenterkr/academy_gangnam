@@ -16,11 +16,13 @@ interface MaskedStudent {
 interface GradeLevel {
   id: string;
   name: string;
+  isActive: boolean;
 }
 
 interface School {
   id: string;
   name: string;
+  isActive: boolean;
 }
 
 interface DuplicateCandidate {
@@ -170,7 +172,7 @@ export function StudentListPage() {
             className="rounded border border-gray-300 px-3 py-2 text-base"
           >
             <option value="">선택</option>
-            {gradeLevels.map((grade) => (
+            {gradeLevels.filter((grade) => grade.isActive).map((grade) => (
               <option key={grade.id} value={grade.id}>
                 {grade.name}
               </option>
@@ -181,7 +183,7 @@ export function StudentListPage() {
           <span>학교</span>
           <select value={schoolId} onChange={(event) => setSchoolId(event.target.value)} className="rounded border border-gray-300 px-3 py-2 text-base">
             <option value="">선택 안 함</option>
-            {schools.map((school) => (
+            {schools.filter((school) => school.isActive).map((school) => (
               <option key={school.id} value={school.id}>
                 {school.name}
               </option>

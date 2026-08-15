@@ -115,6 +115,20 @@ describe('students routes — list and create', () => {
     expect(response.body.error.code).toBe('VALIDATION_ERROR');
   });
 
+  it('rejects a malformed registrationDate with a clean 400', async () => {
+    const { gradeLevelId } = await seedSuperAdminAndGrade();
+    const app = createApp({ emailAdapter: createFakeEmailAdapter() });
+    const cookie = await loginAs(app, SUPER_EMAIL);
+
+    const response = await request(app)
+      .post('/api/students')
+      .set('Cookie', cookie)
+      .send({ name: TEST_STUDENT_NAME, phone: TEST_STUDENT_PHONE, gradeLevelId, registrationDate: 'not-a-date' });
+
+    expect(response.status).toBe(400);
+    expect(response.body.error.code).toBe('VALIDATION_ERROR');
+  });
+
   it('warns about a duplicate phone instead of creating, until confirmDuplicate is set', async () => {
     const { gradeLevelId } = await seedSuperAdminAndGrade();
     const app = createApp({ emailAdapter: createFakeEmailAdapter() });
