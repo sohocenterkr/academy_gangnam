@@ -52,7 +52,7 @@ describe('GuardianListPage', () => {
         const body = JSON.parse(init.body as string) as { confirmDuplicate?: boolean };
         if (!body.confirmDuplicate) {
           return Promise.resolve(
-            jsonResponse({ status: 'duplicate_warning', duplicates: [{ id: 'g1', name: '김철수', phoneNormalized: '010-****-5678' }] })
+            jsonResponse({ status: 'duplicate_warning', duplicates: [{ id: 'g1', name: '김*수', phoneNormalized: '010-****-5678' }] })
           );
         }
         return Promise.resolve(
@@ -71,7 +71,7 @@ describe('GuardianListPage', () => {
     fireEvent.click(screen.getByRole('button', { name: '보호자 등록' }));
 
     await screen.findByText(/이미 등록된 전화번호/);
-    expect(screen.getByText(/김철수/)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: '김*수' })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: '그래도 등록' }));
 

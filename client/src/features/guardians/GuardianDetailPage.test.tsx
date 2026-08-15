@@ -48,4 +48,20 @@ describe('GuardianDetailPage', () => {
     await waitFor(() => expect(screen.getByText('저장되었습니다.')).toBeInTheDocument());
     expect(fetchMock.mock.calls[1]![1]).toMatchObject({ method: 'PATCH' });
   });
+
+  it('shows the error and a way back when loading the guardian fails', async () => {
+    const fetchMock = vi.fn();
+    fetchMock.mockResolvedValueOnce({
+      ok: false,
+      json: async () => ({
+        error: { code: 'NOT_FOUND', message: '보호자를 찾을 수 없습니다.', requestId: 'req' },
+      }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderAtGuardianDetail('missing-id');
+
+    expect(await screen.findByText('보호자를 찾을 수 없습니다.')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: '목록으로' })).toBeInTheDocument();
+  });
 });

@@ -84,7 +84,18 @@ export function GuardianDetailPage() {
   }
 
   if (status === 'loading') return <p className="p-4 text-gray-500">불러오는 중...</p>;
-  if (!guardian) return null;
+  if (!guardian) {
+    return (
+      <section className="p-4">
+        <Link href="/admin/guardians" className="text-blue-600 underline">
+          목록으로
+        </Link>
+        <p role="alert" className="mt-2 text-sm text-red-600">
+          {error ?? '보호자를 찾을 수 없습니다.'}
+        </p>
+      </section>
+    );
+  }
 
   return (
     <section className="p-4">
@@ -126,7 +137,10 @@ export function GuardianDetailPage() {
             <ul className="mt-1 list-disc pl-5">
               {duplicates.map((candidate) => (
                 <li key={candidate.id}>
-                  {candidate.name} ({candidate.phoneNormalized})
+                  <Link href={`/admin/guardians/${candidate.id}`} className="underline">
+                    {candidate.name}
+                  </Link>{' '}
+                  ({candidate.phoneNormalized})
                 </li>
               ))}
             </ul>

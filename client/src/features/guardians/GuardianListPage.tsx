@@ -148,7 +148,10 @@ export function GuardianListPage() {
             <ul className="mt-1 list-disc pl-5">
               {duplicates.map((candidate) => (
                 <li key={candidate.id}>
-                  {candidate.name} ({candidate.phoneNormalized})
+                  <Link href={`/admin/guardians/${candidate.id}`} className="underline">
+                    {candidate.name}
+                  </Link>{' '}
+                  ({candidate.phoneNormalized})
                 </li>
               ))}
             </ul>

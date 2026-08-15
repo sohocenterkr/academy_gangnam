@@ -103,7 +103,7 @@ export function createGuardiansRouter(deps: GuardiansRouterDeps): Router {
         res.json({
           data: {
             status: 'duplicate_warning',
-            duplicates: existingMatches.map((g) => ({ id: g.id, name: g.name, phoneNormalized: maskPhone(g.phoneNormalized) })),
+            duplicates: existingMatches.map((g) => ({ id: g.id, name: maskName(g.name), phoneNormalized: maskPhone(g.phoneNormalized) })),
           },
           meta: { requestId: req.requestId, kstTimestamp: getNowKSTISOString() },
         });
@@ -207,7 +207,7 @@ export function createGuardiansRouter(deps: GuardiansRouterDeps): Router {
           res.json({
             data: {
               status: 'duplicate_warning',
-              duplicates: existingMatches.map((g) => ({ id: g.id, name: g.name, phoneNormalized: maskPhone(g.phoneNormalized) })),
+              duplicates: existingMatches.map((g) => ({ id: g.id, name: maskName(g.name), phoneNormalized: maskPhone(g.phoneNormalized) })),
             },
             meta: { requestId: req.requestId, kstTimestamp: getNowKSTISOString() },
           });

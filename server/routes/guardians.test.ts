@@ -1,4 +1,4 @@
-import { and, eq, ilike } from 'drizzle-orm';
+import { eq, ilike } from 'drizzle-orm';
 import { afterEach, describe, expect, it } from 'vitest';
 import request from 'supertest';
 import { db } from '../db';
@@ -36,7 +36,6 @@ async function loginAs(app: ReturnType<typeof createApp>, email: string): Promis
 
 async function cleanup() {
   await db.delete(guardians).where(eq(guardians.name, TEST_GUARDIAN_NAME));
-  await db.delete(guardians).where(eq(guardians.phoneNormalized, TEST_GUARDIAN_PHONE));
   // Catches any other test-created guardian by naming convention (e.g. the second guardian in the
   // duplicate-phone-warning tests), regardless of which test created it or whether that test's own
   // assertions failed before reaching its explicit inline delete.
@@ -120,8 +119,6 @@ describe('guardians routes — list and create', () => {
 
     expect(confirmed.status).toBe(200);
     expect(confirmed.body.data.status).toBe('created');
-
-    await db.delete(guardians).where(and(eq(guardians.name, 'test-guardian-이영희'), eq(guardians.phoneNormalized, TEST_GUARDIAN_PHONE)));
   });
 
   it('searches the guardian list by name', async () => {
@@ -216,7 +213,5 @@ describe('guardians routes — detail and update', () => {
 
     expect(attempt.status).toBe(200);
     expect(attempt.body.data.status).toBe('duplicate_warning');
-
-    await db.delete(guardians).where(eq(guardians.name, 'test-guardian-박민수'));
   });
 });
