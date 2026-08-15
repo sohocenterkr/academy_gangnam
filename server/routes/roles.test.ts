@@ -10,7 +10,11 @@ import { createApp } from '../app';
 
 const SUPER_EMAIL = 'test-roles-super@example.com';
 const PLAIN_EMAIL = 'test-roles-plain@example.com';
+const MANAGE_ONLY_EMAIL = 'test-roles-manage-only@example.com';
 const PASSWORD = 'test-roles-password-123';
+
+const MANAGE_ONLY_ROLE_NAME = 'test-roles-manage-only-role';
+const SYSTEM_ROLE_NAME = 'test-roles-system-role';
 
 async function seedAdmins() {
   const [superRole] = await db
@@ -30,6 +34,26 @@ async function seedAdmins() {
   return { superRole, plainRole };
 }
 
+// Seeds an admin with roles:manage but WITHOUT the wildcard permission — the case that
+// distinguishes "lacks roles:manage entirely" (blocked by the permission middleware) from
+// "has roles:manage but isn't a super-admin" (blocked by the escalation guard specifically).
+async function seedManageOnlyAdmin() {
+  const [manageOnlyRole] = await db
+    .insert(roles)
+    .values({ name: MANAGE_ONLY_ROLE_NAME, permissions: [PERMISSIONS.ROLES_MANAGE] })
+    .returning();
+  if (!manageOnlyRole) throw new Error('failed to seed manage-only test role');
+  const passwordHash = await hashPassword(PASSWORD);
+  await db.insert(admins).values({
+    email: MANAGE_ONLY_EMAIL,
+    name: '역할관리자',
+    passwordHash,
+    roleId: manageOnlyRole.id,
+    status: 'active',
+  });
+  return { manageOnlyRole };
+}
+
 async function loginAs(app: ReturnType<typeof createApp>, email: string): Promise<string> {
   const response = await request(app).post('/api/auth/login').send({ email, password: PASSWORD });
   const cookie = response.headers['set-cookie']?.[0];
@@ -37,19 +61,25 @@ async function loginAs(app: ReturnType<typeof createApp>, email: string): Promis
   return cookie;
 }
 
-// Deletes auth_sessions and audit_logs for both test admins first — several tests below log in
+// Deletes auth_sessions and audit_logs for all test admins first — several tests below log in
 // for real and write audit log rows, and a leftover row in either table would block deleting the
 // admin it references via the foreign key.
 async function cleanup(extraRoleNames: string[] = []) {
-  const testAdmins = await db.select().from(admins).where(inArray(admins.email, [SUPER_EMAIL, PLAIN_EMAIL]));
+  const testAdmins = await db
+    .select()
+    .from(admins)
+    .where(inArray(admins.email, [SUPER_EMAIL, PLAIN_EMAIL, MANAGE_ONLY_EMAIL]));
   for (const admin of testAdmins) {
     await db.delete(authSessions).where(eq(authSessions.adminId, admin.id));
     await db.delete(auditLogs).where(eq(auditLogs.adminId, admin.id));
   }
   await db.delete(admins).where(eq(admins.email, SUPER_EMAIL));
   await db.delete(admins).where(eq(admins.email, PLAIN_EMAIL));
+  await db.delete(admins).where(eq(admins.email, MANAGE_ONLY_EMAIL));
   await db.delete(roles).where(eq(roles.name, 'test-roles-super-role'));
   await db.delete(roles).where(eq(roles.name, 'test-roles-plain-role'));
+  await db.delete(roles).where(eq(roles.name, MANAGE_ONLY_ROLE_NAME));
+  await db.delete(roles).where(eq(roles.name, SYSTEM_ROLE_NAME));
   for (const name of extraRoleNames) {
     await db.delete(roles).where(eq(roles.name, name));
   }
@@ -101,9 +131,58 @@ describe('roles routes', () => {
     const response = await request(app)
       .patch(`/api/roles/${superRole.id}`)
       .set('Cookie', cookie)
-      .send({ permissions: [] });
+      .send({ permissions: [], expectedUpdatedAt: superRole.updatedAt.toISOString() });
 
     expect(response.status).toBe(409);
     expect(response.body.error.code).toBe('LAST_SUPER_ADMIN');
+  });
+
+  it('rejects granting the wildcard permission via POST from an admin who is not already a super-admin', async () => {
+    await seedManageOnlyAdmin();
+    const app = createApp({ emailAdapter: createFakeEmailAdapter() });
+    const cookie = await loginAs(app, MANAGE_ONLY_EMAIL);
+
+    const response = await request(app)
+      .post('/api/roles')
+      .set('Cookie', cookie)
+      .send({ name: 'test-roles-new-role', permissions: [SUPER_ADMIN_WILDCARD_PERMISSION] });
+
+    expect(response.status).toBe(403);
+    expect(response.body.error.code).toBe('FORBIDDEN');
+  });
+
+  it('rejects granting the wildcard permission via PATCH from an admin who is not already a super-admin', async () => {
+    const { plainRole } = await seedAdmins();
+    await seedManageOnlyAdmin();
+    const app = createApp({ emailAdapter: createFakeEmailAdapter() });
+    const cookie = await loginAs(app, MANAGE_ONLY_EMAIL);
+
+    const response = await request(app)
+      .patch(`/api/roles/${plainRole.id}`)
+      .set('Cookie', cookie)
+      .send({ permissions: [SUPER_ADMIN_WILDCARD_PERMISSION], expectedUpdatedAt: plainRole.updatedAt.toISOString() });
+
+    expect(response.status).toBe(403);
+    expect(response.body.error.code).toBe('FORBIDDEN');
+  });
+
+  it('refuses to PATCH a system role', async () => {
+    await seedAdmins();
+    const [systemRole] = await db
+      .insert(roles)
+      .values({ name: SYSTEM_ROLE_NAME, permissions: [], isSystem: true })
+      .returning();
+    if (!systemRole) throw new Error('failed to seed system test role');
+
+    const app = createApp({ emailAdapter: createFakeEmailAdapter() });
+    const cookie = await loginAs(app, SUPER_EMAIL);
+
+    const response = await request(app)
+      .patch(`/api/roles/${systemRole.id}`)
+      .set('Cookie', cookie)
+      .send({ name: 'renamed', expectedUpdatedAt: systemRole.updatedAt.toISOString() });
+
+    expect(response.status).toBe(403);
+    expect(response.body.error.code).toBe('FORBIDDEN');
   });
 });

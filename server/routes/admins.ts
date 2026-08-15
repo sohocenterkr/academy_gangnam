@@ -6,6 +6,7 @@ import { PERMISSIONS, SUPER_ADMIN_WILDCARD_PERMISSION } from '@shared/permission
 import { db } from '../db';
 import { admins, roles } from '@shared/schema';
 import { hashPassword } from '../utils/password';
+import { normalizeEmail } from '../utils/email';
 import { parseBody } from '../utils/validate';
 import { createRequireAuth } from '../middleware/auth';
 import { createRequirePermission } from '../middleware/permissions';
@@ -70,10 +71,51 @@ export function createAdminsRouter(deps: AdminsRouterDeps): Router {
     const parsed = parseBody(createAdminSchema, req.body, res, req.requestId);
     if (!parsed) return;
 
+    const [targetRole] = await db.select().from(roles).where(eq(roles.id, parsed.roleId));
+    if (!targetRole) {
+      res.status(400).json({
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: '입력값을 확인해 주세요.',
+          fieldErrors: { roleId: ['존재하지 않는 역할입니다.'] },
+          requestId: req.requestId,
+        },
+      });
+      return;
+    }
+
+    if (
+      targetRole.permissions.includes(SUPER_ADMIN_WILDCARD_PERMISSION) &&
+      !req.admin!.permissions.includes(SUPER_ADMIN_WILDCARD_PERMISSION)
+    ) {
+      res.status(403).json({
+        error: {
+          code: 'FORBIDDEN',
+          message: '최고관리자 역할을 부여할 권한이 없습니다.',
+          requestId: req.requestId,
+        },
+      });
+      return;
+    }
+
+    const normalizedEmail = normalizeEmail(parsed.email);
+    const [existingAdmin] = await db.select().from(admins).where(eq(admins.email, normalizedEmail));
+    if (existingAdmin) {
+      res.status(400).json({
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: '입력값을 확인해 주세요.',
+          fieldErrors: { email: ['이미 사용 중인 이메일입니다.'] },
+          requestId: req.requestId,
+        },
+      });
+      return;
+    }
+
     const passwordHash = await hashPassword(parsed.password);
     const [created] = await db
       .insert(admins)
-      .values({ email: parsed.email, name: parsed.name, passwordHash, roleId: parsed.roleId, status: 'active' })
+      .values({ email: normalizedEmail, name: parsed.name, passwordHash, roleId: parsed.roleId, status: 'active' })
       .returning();
     if (!created) {
       res.status(500).json({
@@ -132,6 +174,24 @@ export function createAdminsRouter(deps: AdminsRouterDeps): Router {
         error: { code: 'VERSION_CONFLICT', message: '다른 곳에서 이미 변경되었습니다. 새로고침 후 다시 시도해 주세요.', requestId: req.requestId },
       });
       return;
+    }
+
+    if (parsed.roleId !== undefined) {
+      const [targetRole] = await db.select().from(roles).where(eq(roles.id, parsed.roleId));
+      if (
+        targetRole &&
+        targetRole.permissions.includes(SUPER_ADMIN_WILDCARD_PERMISSION) &&
+        !req.admin!.permissions.includes(SUPER_ADMIN_WILDCARD_PERMISSION)
+      ) {
+        res.status(403).json({
+          error: {
+            code: 'FORBIDDEN',
+            message: '최고관리자 역할을 부여할 권한이 없습니다.',
+            requestId: req.requestId,
+          },
+        });
+        return;
+      }
     }
 
     const wouldDeactivate = parsed.status !== undefined && parsed.status !== 'active';
@@ -238,7 +298,7 @@ export function createAdminsRouter(deps: AdminsRouterDeps): Router {
       return;
     }
 
-    await requestPasswordReset(admin.email, deps.appUrl, deps.emailAdapter);
+    await requestPasswordReset(admin.email, deps.appUrl, deps.emailAdapter, deps.sessionSecret);
 
     res.json({
       data: { message: '재설정 안내 메일을 보냈습니다.' },

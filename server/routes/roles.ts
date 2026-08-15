@@ -18,6 +18,7 @@ const createRoleSchema = z.object({
 const updateRoleSchema = z.object({
   name: z.string().min(1).optional(),
   permissions: z.array(z.string()).optional(),
+  expectedUpdatedAt: z.string(),
 });
 
 export interface RolesRouterDeps {
@@ -37,6 +38,20 @@ export function createRolesRouter(deps: RolesRouterDeps): Router {
   router.post('/', requireAuth, requireRolesManage, async (req, res) => {
     const parsed = parseBody(createRoleSchema, req.body, res, req.requestId);
     if (!parsed) return;
+
+    if (
+      parsed.permissions.includes(SUPER_ADMIN_WILDCARD_PERMISSION) &&
+      !req.admin!.permissions.includes(SUPER_ADMIN_WILDCARD_PERMISSION)
+    ) {
+      res.status(403).json({
+        error: {
+          code: 'FORBIDDEN',
+          message: '최고관리자 권한을 부여할 권한이 없습니다.',
+          requestId: req.requestId,
+        },
+      });
+      return;
+    }
 
     const [created] = await db
       .insert(roles)
@@ -80,6 +95,35 @@ export function createRolesRouter(deps: RolesRouterDeps): Router {
       return;
     }
 
+    if (before.isSystem) {
+      res.status(403).json({
+        error: { code: 'FORBIDDEN', message: '시스템 역할은 수정할 수 없습니다.', requestId: req.requestId },
+      });
+      return;
+    }
+
+    if (before.updatedAt.toISOString() !== parsed.expectedUpdatedAt) {
+      res.status(409).json({
+        error: { code: 'VERSION_CONFLICT', message: '다른 곳에서 이미 변경되었습니다. 새로고침 후 다시 시도해 주세요.', requestId: req.requestId },
+      });
+      return;
+    }
+
+    if (
+      parsed.permissions !== undefined &&
+      parsed.permissions.includes(SUPER_ADMIN_WILDCARD_PERMISSION) &&
+      !req.admin!.permissions.includes(SUPER_ADMIN_WILDCARD_PERMISSION)
+    ) {
+      res.status(403).json({
+        error: {
+          code: 'FORBIDDEN',
+          message: '최고관리자 권한을 부여할 권한이 없습니다.',
+          requestId: req.requestId,
+        },
+      });
+      return;
+    }
+
     const removingWildcard =
       parsed.permissions !== undefined &&
       before.permissions.includes(SUPER_ADMIN_WILDCARD_PERMISSION) &&
@@ -103,9 +147,10 @@ export function createRolesRouter(deps: RolesRouterDeps): Router {
       }
     }
 
+    const { expectedUpdatedAt: _expected, ...changes } = parsed;
     const [updated] = await db
       .update(roles)
-      .set({ ...parsed, updatedAt: new Date() })
+      .set({ ...changes, updatedAt: new Date() })
       .where(eq(roles.id, id))
       .returning();
     if (!updated) {

@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { db } from '../db';
 import { admins } from '@shared/schema';
 import { verifyPassword } from '../utils/password';
+import { normalizeEmail } from '../utils/email';
 import { buildExpiredSessionCookie, buildSessionCookie } from '../utils/cookies';
 import { parseBody } from '../utils/validate';
 import { createRateLimiter } from '../utils/rateLimit';
@@ -50,7 +51,7 @@ export function createAuthRouter(deps: AuthRouterDeps): Router {
     const parsed = parseBody(loginSchema, req.body, res, req.requestId);
     if (!parsed) return;
 
-    const [admin] = await db.select().from(admins).where(eq(admins.email, parsed.email));
+    const [admin] = await db.select().from(admins).where(eq(admins.email, normalizeEmail(parsed.email)));
 
     if (!admin || admin.status !== 'active' || (admin.lockedUntil && admin.lockedUntil > new Date())) {
       res.status(401).json({ error: { ...GENERIC_LOGIN_FAILURE, requestId: req.requestId } });

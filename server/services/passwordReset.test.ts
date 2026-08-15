@@ -7,6 +7,7 @@ import { createFakeEmailAdapter } from './email';
 import { requestPasswordReset, resetPassword } from './passwordReset';
 
 const TEST_EMAIL = 'test-password-reset-admin@example.com';
+const TEST_SECRET = 'test-password-reset-secret-value';
 
 async function seedAdmin() {
   const [role] = await db.insert(roles).values({ name: 'test-reset-role', permissions: [] }).returning();
@@ -47,7 +48,7 @@ describe('password reset service', () => {
     await seedAdmin();
     const emailAdapter = createFakeEmailAdapter();
 
-    await requestPasswordReset(TEST_EMAIL, 'http://localhost:5173', emailAdapter);
+    await requestPasswordReset(TEST_EMAIL, 'http://localhost:5173', emailAdapter, TEST_SECRET);
 
     expect(emailAdapter.sentEmails).toHaveLength(1);
     const [sent] = emailAdapter.sentEmails;
@@ -60,14 +61,14 @@ describe('password reset service', () => {
 
   it('does nothing (no throw, no email) when the email does not exist', async () => {
     const emailAdapter = createFakeEmailAdapter();
-    await requestPasswordReset('no-such-admin@example.com', 'http://localhost:5173', emailAdapter);
+    await requestPasswordReset('no-such-admin@example.com', 'http://localhost:5173', emailAdapter, TEST_SECRET);
     expect(emailAdapter.sentEmails).toHaveLength(0);
   });
 
   it('resets the password with a valid token and invalidates the token afterward', async () => {
     await seedAdmin();
     const emailAdapter = createFakeEmailAdapter();
-    await requestPasswordReset(TEST_EMAIL, 'http://localhost:5173', emailAdapter);
+    await requestPasswordReset(TEST_EMAIL, 'http://localhost:5173', emailAdapter, TEST_SECRET);
     const [sent] = emailAdapter.sentEmails;
     if (!sent) {
       throw new Error('Expected an email to have been sent in test');
@@ -77,7 +78,7 @@ describe('password reset service', () => {
       throw new Error('Expected a token in the reset URL in test');
     }
 
-    const result = await resetPassword(rawToken, 'brand-new-password-456');
+    const result = await resetPassword(rawToken, 'brand-new-password-456', TEST_SECRET);
     expect(result.success).toBe(true);
 
     const [admin] = await db.select().from(admins).where(eq(admins.email, TEST_EMAIL));
@@ -86,12 +87,43 @@ describe('password reset service', () => {
     }
     await expect(verifyPassword('brand-new-password-456', admin.passwordHash)).resolves.toBe(true);
 
-    const second = await resetPassword(rawToken, 'another-password-789');
+    const second = await resetPassword(rawToken, 'another-password-789', TEST_SECRET);
     expect(second.success).toBe(false);
   });
 
   it('rejects an unknown token', async () => {
-    const result = await resetPassword('not-a-real-token', 'whatever-password-123');
+    const result = await resetPassword('not-a-real-token', 'whatever-password-123', TEST_SECRET);
     expect(result.success).toBe(false);
+  });
+
+  it('rejects a reset for an admin who was deactivated after the reset was requested', async () => {
+    const { admin } = await seedAdmin();
+    const emailAdapter = createFakeEmailAdapter();
+    await requestPasswordReset(TEST_EMAIL, 'http://localhost:5173', emailAdapter, TEST_SECRET);
+    const [sent] = emailAdapter.sentEmails;
+    if (!sent) {
+      throw new Error('Expected an email to have been sent in test');
+    }
+    const rawToken = new URL(sent.resetUrl).searchParams.get('token');
+    if (!rawToken) {
+      throw new Error('Expected a token in the reset URL in test');
+    }
+
+    // Deactivate the admin directly in the DB, simulating a status change that happens
+    // between the reset request and the reset completion.
+    await db.update(admins).set({ status: 'inactive' }).where(eq(admins.id, admin.id));
+
+    const result = await resetPassword(rawToken, 'brand-new-password-456', TEST_SECRET);
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.code).toBe('INVALID_RESET_TOKEN');
+    }
+
+    const [reloadedAdmin] = await db.select().from(admins).where(eq(admins.id, admin.id));
+    if (!reloadedAdmin) {
+      throw new Error('Admin not found after failed reset in test');
+    }
+    // The password must be unchanged since the reset was rejected.
+    await expect(verifyPassword('original-password-123', reloadedAdmin.passwordHash)).resolves.toBe(true);
   });
 });

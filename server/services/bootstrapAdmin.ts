@@ -3,6 +3,7 @@ import { db } from '../db';
 import { admins, roles } from '@shared/schema';
 import { SUPER_ADMIN_ROLE_NAME, SUPER_ADMIN_WILDCARD_PERMISSION } from '@shared/permissions';
 import { hashPassword } from '../utils/password';
+import { normalizeEmail } from '../utils/email';
 
 interface BootstrapEnv {
   INITIAL_ADMIN_EMAIL: string;
@@ -47,7 +48,7 @@ export async function bootstrapAdmin(env: BootstrapEnv): Promise<void> {
 
   try {
     await db.insert(admins).values({
-      email: env.INITIAL_ADMIN_EMAIL,
+      email: normalizeEmail(env.INITIAL_ADMIN_EMAIL),
       name: env.INITIAL_ADMIN_NAME,
       passwordHash,
       roleId: role.id,

@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm';
+import { eq, inArray } from 'drizzle-orm';
 import { afterEach, describe, expect, it } from 'vitest';
 import request from 'supertest';
 import { db } from '../db';
@@ -9,6 +9,8 @@ import { createFakeEmailAdapter } from '../services/email';
 
 const TEST_EMAIL = 'test-auth-route-admin@example.com';
 const TEST_PASSWORD = 'correct-password-123';
+const MIXED_CASE_EMAIL = 'Test-Auth-Mixed-Case@Example.com';
+const MIXED_CASE_ROLE_NAME = 'test-auth-mixed-case-role';
 
 async function seedAdmin() {
   const [role] = await db.insert(roles).values({ name: 'test-auth-role', permissions: ['x:y'] }).returning();
@@ -42,6 +44,20 @@ async function cleanup() {
   }
   await db.delete(admins).where(eq(admins.email, TEST_EMAIL));
   await db.delete(roles).where(eq(roles.name, 'test-auth-role'));
+
+  // Stored normalized (lowercase) since the admin was created via normalizeEmail; look it up
+  // that way too, but also sweep the raw mixed-case value just in case normalization ever
+  // regresses and leaves a differently-cased row behind.
+  const mixedCaseCandidates = await db
+    .select()
+    .from(admins)
+    .where(inArray(admins.email, [MIXED_CASE_EMAIL, MIXED_CASE_EMAIL.toLowerCase()]));
+  for (const candidate of mixedCaseCandidates) {
+    await db.delete(authSessions).where(eq(authSessions.adminId, candidate.id));
+    await db.delete(passwordResetTokens).where(eq(passwordResetTokens.adminId, candidate.id));
+    await db.delete(admins).where(eq(admins.id, candidate.id));
+  }
+  await db.delete(roles).where(eq(roles.name, MIXED_CASE_ROLE_NAME));
 }
 
 describe('auth routes', () => {
@@ -81,6 +97,35 @@ describe('auth routes', () => {
 
     expect(response.status).toBe(401);
     expect(response.body.error.code).toBe('UNAUTHENTICATED');
+  });
+
+  it('logs in successfully with a differently-cased email than how the admin was created', async () => {
+    const [role] = await db
+      .insert(roles)
+      .values({ name: MIXED_CASE_ROLE_NAME, permissions: ['x:y'] })
+      .returning();
+    if (!role) {
+      throw new Error('Role creation failed in test');
+    }
+    // Every real write path (bootstrapAdmin, POST /api/admins) normalizes the email to
+    // lowercase before storing it, so the admin is always stored lowercase in practice —
+    // seed it that way here too, and log in with a differently-cased variant to prove the
+    // login lookup also normalizes and still finds the (lowercase-stored) row.
+    await db.insert(admins).values({
+      email: MIXED_CASE_EMAIL.toLowerCase(),
+      name: '대소문자테스트',
+      passwordHash: await hashPassword(TEST_PASSWORD),
+      roleId: role.id,
+      status: 'active',
+    });
+    const app = createApp({ emailAdapter: createFakeEmailAdapter() });
+
+    const response = await request(app)
+      .post('/api/auth/login')
+      .send({ email: MIXED_CASE_EMAIL, password: TEST_PASSWORD });
+
+    expect(response.status).toBe(200);
+    expect(response.body.data.email).toBe(MIXED_CASE_EMAIL.toLowerCase());
   });
 
   it('GET /me returns 401 without a session cookie', async () => {

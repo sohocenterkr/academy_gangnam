@@ -1,7 +1,7 @@
 import { eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { db } from '../db';
-import { admins, authSessions, passwordResetTokens, roles } from '@shared/schema';
+import { admins, auditLogs, authSessions, passwordResetTokens, roles } from '@shared/schema';
 import { SUPER_ADMIN_ROLE_NAME } from '@shared/permissions';
 import { verifyPassword } from '../utils/password';
 import { bootstrapAdmin } from './bootstrapAdmin';
@@ -19,11 +19,14 @@ describe('bootstrapAdmin', () => {
 
     let existingAdmins: typeof admins.$inferSelect[] = [];
     // The real bootstrapped admin may already have history (auth sessions, password
-    // reset tokens) once it has been used for a real login — e.g. the e2e login test.
-    // Those rows reference admins.id with no cascade, so they must be captured and
-    // restored alongside the admin itself rather than left to block the delete below.
+    // reset tokens, audit log entries) once it has been used for a real login or has
+    // performed an audited admin/role action — e.g. the e2e login test, or any manual
+    // exercise of /api/admins or /api/roles. Those rows reference admins.id with no
+    // cascade, so they must be captured and restored alongside the admin itself rather
+    // than left to block the delete below.
     const existingAuthSessions: typeof authSessions.$inferSelect[] = [];
     const existingPasswordResetTokens: typeof passwordResetTokens.$inferSelect[] = [];
+    const existingAuditLogs: typeof auditLogs.$inferSelect[] = [];
     if (existingRole) {
       existingAdmins = await db
         .select()
@@ -42,24 +45,49 @@ describe('bootstrapAdmin', () => {
           .from(passwordResetTokens)
           .where(eq(passwordResetTokens.adminId, admin.id));
         existingPasswordResetTokens.push(...tokens);
+
+        const logs = await db
+          .select()
+          .from(auditLogs)
+          .where(eq(auditLogs.adminId, admin.id));
+        existingAuditLogs.push(...logs);
       }
     }
 
+    // Whether the destructive delete below actually committed. bootstrapAdmin() reads
+    // through the top-level `db` pool (a separate physical connection from any `tx` we'd
+    // open here), so it can only observe the "clean slate" once the delete has actually
+    // committed — an uncommitted delete inside an open transaction is invisible to other
+    // connections under Postgres's default read-committed isolation. That's why the delete
+    // is its own committed transaction (atomic: all five tables or none, never a partial
+    // delete) rather than one giant transaction spanning the bootstrapAdmin() call too.
+    // The safety net this preserves: if the delete transaction itself throws partway
+    // through, it rolls back automatically and NOTHING was removed — so `deleted` stays
+    // false and the finally block below correctly skips restoring rows that were never
+    // taken out in the first place (which would otherwise fail on duplicate keys).
+    let deleted = false;
+
     try {
-      // Step 2: Delete existing state to create a clean slate
+      // Step 2: Delete existing state to create a clean slate, atomically.
       if (existingRole && existingAdmins.length > 0) {
-        // Delete rows that reference admins.id first (respects FK)
-        for (const session of existingAuthSessions) {
-          await db.delete(authSessions).where(eq(authSessions.id, session.id));
-        }
-        for (const token of existingPasswordResetTokens) {
-          await db.delete(passwordResetTokens).where(eq(passwordResetTokens.id, token.id));
-        }
-        // Then delete admins, then the role (respects FK)
-        for (const admin of existingAdmins) {
-          await db.delete(admins).where(eq(admins.id, admin.id));
-        }
-        await db.delete(roles).where(eq(roles.id, existingRole.id));
+        await db.transaction(async (tx) => {
+          // Delete rows that reference admins.id first (respects FK)
+          for (const session of existingAuthSessions) {
+            await tx.delete(authSessions).where(eq(authSessions.id, session.id));
+          }
+          for (const token of existingPasswordResetTokens) {
+            await tx.delete(passwordResetTokens).where(eq(passwordResetTokens.id, token.id));
+          }
+          for (const log of existingAuditLogs) {
+            await tx.delete(auditLogs).where(eq(auditLogs.id, log.id));
+          }
+          // Then delete admins, then the role (respects FK)
+          for (const admin of existingAdmins) {
+            await tx.delete(admins).where(eq(admins.id, admin.id));
+          }
+          await tx.delete(roles).where(eq(roles.id, existingRole.id));
+        });
+        deleted = true;
       }
 
       // Step 3: Run test with fake email against clean slate
@@ -112,18 +140,26 @@ describe('bootstrapAdmin', () => {
         await db.delete(roles).where(eq(roles.id, testCreatedRole.id));
       }
 
-      // Restore original role and admins if they existed
-      if (existingRole) {
-        await db.insert(roles).values(existingRole);
-        for (const admin of existingAdmins) {
-          await db.insert(admins).values(admin);
-        }
-        for (const session of existingAuthSessions) {
-          await db.insert(authSessions).values(session);
-        }
-        for (const token of existingPasswordResetTokens) {
-          await db.insert(passwordResetTokens).values(token);
-        }
+      // Restore original role and admins if we actually deleted them. Restoring is done
+      // as a single atomic transaction: either every captured row goes back in (same ids,
+      // nothing regenerated) or none of them do, so a mid-restore failure never leaves the
+      // real admin's history half-restored.
+      if (existingRole && deleted) {
+        await db.transaction(async (tx) => {
+          await tx.insert(roles).values(existingRole);
+          for (const admin of existingAdmins) {
+            await tx.insert(admins).values(admin);
+          }
+          for (const session of existingAuthSessions) {
+            await tx.insert(authSessions).values(session);
+          }
+          for (const token of existingPasswordResetTokens) {
+            await tx.insert(passwordResetTokens).values(token);
+          }
+          for (const log of existingAuditLogs) {
+            await tx.insert(auditLogs).values(log);
+          }
+        });
       }
 
       // Step 5: Verify restoration
@@ -148,6 +184,15 @@ describe('bootstrapAdmin', () => {
               expect(restoredAdmin.id).toBe(expectedAdmin.id);
               expect(restoredAdmin.email).toBe(expectedAdmin.email);
             }
+          }
+
+          for (const admin of existingAdmins) {
+            const restoredAuditLogsForAdmin = await db
+              .select()
+              .from(auditLogs)
+              .where(eq(auditLogs.adminId, admin.id));
+            const expectedCount = existingAuditLogs.filter((log) => log.adminId === admin.id).length;
+            expect(restoredAuditLogsForAdmin).toHaveLength(expectedCount);
           }
         }
       }
