@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "concurrently -n client,server -c blue,green \"npm:dev:client\" \"npm:dev:server\"",
     "dev:client": "vite",
-    "dev:server": "tsx watch --tsconfig server/tsconfig.json server/index.ts",
+    "dev:server": "dotenv -e .env -- tsx watch --tsconfig server/tsconfig.json server/index.ts",
     "build": "vite build",
     "check": "npm run lint && npm run typecheck",
     "lint": "eslint .",
