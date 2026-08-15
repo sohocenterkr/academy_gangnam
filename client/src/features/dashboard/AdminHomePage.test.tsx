@@ -45,6 +45,7 @@ describe('AdminHomePage', () => {
       '/admin/settings/academics'
     );
     expect(screen.getByRole('link', { name: '보호자 관리' })).toHaveAttribute('href', '/admin/guardians');
+    expect(screen.getByRole('link', { name: '학생 관리' })).toHaveAttribute('href', '/admin/students');
     expect(screen.getByRole('link', { name: '내 계정' })).toHaveAttribute('href', '/admin/profile');
   });
 });
