@@ -24,6 +24,11 @@ export function AdminHomePage() {
             </Link>
           </li>
           <li>
+            <Link href="/admin/guardians" className="text-blue-600 underline">
+              보호자 관리
+            </Link>
+          </li>
+          <li>
             <Link href="/admin/profile" className="text-blue-600 underline">
               내 계정
             </Link>
