@@ -2,6 +2,7 @@ export const PERMISSIONS = {
   ADMINS_MANAGE: 'admins:manage',
   ROLES_MANAGE: 'roles:manage',
   ACADEMY_MANAGE: 'academy:manage',
+  GUARDIANS_MANAGE: 'guardians:manage',
 } as const;
 
 export type Permission = (typeof PERMISSIONS)[keyof typeof PERMISSIONS];

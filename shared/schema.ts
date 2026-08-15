@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm';
-import { boolean, integer, jsonb, pgTable, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
+import { boolean, index, integer, jsonb, pgTable, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
 
 export const roles = pgTable('roles', {
   id: uuid('id').defaultRandom().primaryKey(),
@@ -127,4 +127,20 @@ export const gradeLevels = pgTable(
       .on(table.name)
       .where(sql`${table.isActive} = true`),
   ]
+);
+
+export const guardians = pgTable(
+  'guardians',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    name: text('name').notNull(),
+    phoneNormalized: text('phone_normalized').notNull(),
+    notes: text('notes'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+    createdBy: uuid('created_by').references(() => admins.id),
+    updatedBy: uuid('updated_by').references(() => admins.id),
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
+  },
+  (table) => [index('guardians_phone_idx').on(table.phoneNormalized)]
 );
