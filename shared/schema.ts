@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm';
-import { boolean, index, integer, jsonb, pgTable, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
+import { boolean, date, index, integer, jsonb, pgTable, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
 
 export const roles = pgTable('roles', {
   id: uuid('id').defaultRandom().primaryKey(),
@@ -143,4 +143,57 @@ export const guardians = pgTable(
     deletedAt: timestamp('deleted_at', { withTimezone: true }),
   },
   (table) => [index('guardians_phone_idx').on(table.phoneNormalized)]
+);
+
+export const students = pgTable(
+  'students',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    name: text('name').notNull(),
+    birthDate: date('birth_date'),
+    schoolId: uuid('school_id').references(() => schools.id),
+    gradeLevelId: uuid('grade_level_id')
+      .notNull()
+      .references(() => gradeLevels.id),
+    phoneNormalized: text('phone_normalized').notNull(),
+    address: text('address'),
+    registrationDate: date('registration_date').notNull(),
+    status: text('status', { enum: ['enrolled', 'paused', 'withdrawn', 'graduated'] })
+      .notNull()
+      .default('enrolled'),
+    statusEffectiveDate: date('status_effective_date').notNull(),
+    specialNotes: text('special_notes'),
+    counselingNotes: text('counseling_notes'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+    createdBy: uuid('created_by').references(() => admins.id),
+    updatedBy: uuid('updated_by').references(() => admins.id),
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
+  },
+  (table) => [index('students_phone_idx').on(table.phoneNormalized)]
+);
+
+export const studentGuardians = pgTable(
+  'student_guardians',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    studentId: uuid('student_id')
+      .notNull()
+      .references(() => students.id),
+    guardianId: uuid('guardian_id')
+      .notNull()
+      .references(() => guardians.id),
+    relationship: text('relationship'),
+    isPrimary: boolean('is_primary').notNull().default(false),
+    receiveMessages: boolean('receive_messages').notNull().default(true),
+    useForCheckin: boolean('use_for_checkin').notNull().default(true),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('student_guardians_student_guardian_unique').on(table.studentId, table.guardianId),
+    uniqueIndex('student_guardians_primary_unique')
+      .on(table.studentId)
+      .where(sql`${table.isPrimary} = true`),
+  ]
 );
