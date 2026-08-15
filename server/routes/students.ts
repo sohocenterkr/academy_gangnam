@@ -52,6 +52,14 @@ const statusChangeSchema = z.object({
   reason: z.string().optional(),
 });
 
+const linkGuardianSchema = z.object({
+  guardianId: z.string().min(1),
+  relationship: z.string().optional(),
+  isPrimary: z.boolean().optional(),
+  receiveMessages: z.boolean().optional(),
+  useForCheckin: z.boolean().optional(),
+});
+
 function toMaskedStudent(student: typeof students.$inferSelect) {
   return {
     id: student.id,
@@ -71,6 +79,21 @@ function isForeignKeyViolation(error: unknown): boolean {
     if (current instanceof Error) {
       const code = (current as { code?: unknown }).code;
       if (code === '23503') return true;
+      current = current.cause;
+      continue;
+    }
+    break;
+  }
+  return false;
+}
+
+function isUniqueViolation(error: unknown, indexName: string): boolean {
+  let current: unknown = error;
+  while (current) {
+    if (current instanceof Error) {
+      if (current.message.includes(indexName)) return true;
+      const constraint = (current as { constraint?: unknown }).constraint;
+      if (typeof constraint === 'string' && constraint.includes(indexName)) return true;
       current = current.cause;
       continue;
     }
@@ -461,6 +484,75 @@ export function createStudentsRouter(deps: StudentsRouterDeps): Router {
     });
 
     res.json({ data: restored, meta: { requestId: req.requestId, kstTimestamp: getNowKSTISOString() } });
+  });
+
+  router.post('/:id/guardians', requireAuth, requireStudentsManage, async (req, res) => {
+    const id = req.params.id;
+    if (!id || Array.isArray(id)) {
+      res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: '잘못된 요청입니다.', requestId: req.requestId } });
+      return;
+    }
+
+    const parsed = parseBody(linkGuardianSchema, req.body, res, req.requestId);
+    if (!parsed) return;
+
+    const [student] = await db.select().from(students).where(eq(students.id, id));
+    if (!student || student.deletedAt) {
+      res.status(404).json({ error: { code: 'NOT_FOUND', message: '학생을 찾을 수 없습니다.', requestId: req.requestId } });
+      return;
+    }
+    const [guardian] = await db.select().from(guardians).where(eq(guardians.id, parsed.guardianId));
+    if (!guardian || guardian.deletedAt) {
+      res.status(404).json({ error: { code: 'NOT_FOUND', message: '보호자를 찾을 수 없습니다.', requestId: req.requestId } });
+      return;
+    }
+
+    let created;
+    try {
+      created = await db.transaction(async (tx) => {
+        if (parsed.isPrimary) {
+          await tx.update(studentGuardians).set({ isPrimary: false, updatedAt: new Date() }).where(eq(studentGuardians.studentId, id));
+        }
+        const [row] = await tx
+          .insert(studentGuardians)
+          .values({
+            studentId: id,
+            guardianId: parsed.guardianId,
+            relationship: parsed.relationship,
+            isPrimary: parsed.isPrimary ?? false,
+            receiveMessages: parsed.receiveMessages ?? true,
+            useForCheckin: parsed.useForCheckin ?? true,
+          })
+          .returning();
+        return row;
+      });
+    } catch (error) {
+      if (isUniqueViolation(error, 'student_guardians_student_guardian_unique')) {
+        res.status(409).json({
+          error: { code: 'DUPLICATE_LINK', message: '이미 연결된 보호자입니다.', requestId: req.requestId },
+        });
+        return;
+      }
+      throw error;
+    }
+    if (!created) {
+      res.status(500).json({ error: { code: 'INTERNAL_ERROR', message: '보호자를 연결하지 못했습니다.', requestId: req.requestId } });
+      return;
+    }
+
+    await writeAuditLog({
+      adminId: req.admin!.id,
+      roleSnapshot: req.admin!.roleName,
+      action: 'student_guardian.create',
+      targetType: 'student_guardian',
+      targetId: created.id,
+      beforeDataSafe: null,
+      afterDataSafe: { studentId: id, guardianId: parsed.guardianId, isPrimary: created.isPrimary },
+      result: 'success',
+      requestId: req.requestId,
+    });
+
+    res.json({ data: created, meta: { requestId: req.requestId, kstTimestamp: getNowKSTISOString() } });
   });
 
   return router;

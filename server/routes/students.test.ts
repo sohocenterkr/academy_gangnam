@@ -1,8 +1,8 @@
-import { eq, ilike } from 'drizzle-orm';
+import { eq, ilike, inArray } from 'drizzle-orm';
 import { afterEach, describe, expect, it } from 'vitest';
 import request from 'supertest';
 import { db } from '../db';
-import { admins, roles, students, gradeLevels } from '@shared/schema';
+import { admins, roles, students, gradeLevels, studentGuardians } from '@shared/schema';
 import { hashPassword } from '../utils/password';
 import { SUPER_ADMIN_WILDCARD_PERMISSION } from '@shared/permissions';
 import { createFakeEmailAdapter } from '../services/email';
@@ -38,6 +38,15 @@ async function loginAs(app: ReturnType<typeof createApp>, email: string): Promis
 }
 
 async function cleanup() {
+  const testStudents = await db.select({ id: students.id }).from(students).where(ilike(students.name, 'test-student-%'));
+  if (testStudents.length > 0) {
+    await db.delete(studentGuardians).where(
+      inArray(
+        studentGuardians.studentId,
+        testStudents.map((s) => s.id)
+      )
+    );
+  }
   await db.delete(students).where(ilike(students.name, 'test-student-%'));
   await db.delete(gradeLevels).where(eq(gradeLevels.name, TEST_GRADE_NAME));
 
@@ -292,5 +301,102 @@ describe('students routes — status, delete, restore', () => {
 
     const afterRestore = await request(app).get(`/api/students/${studentId}`).set('Cookie', cookie);
     expect(afterRestore.status).toBe(200);
+  });
+});
+
+describe('students routes — guardian linking', () => {
+  afterEach(async () => {
+    await cleanup();
+    const { guardians } = await import('@shared/schema');
+    await db.delete(guardians).where(ilike(guardians.name, 'test-student-guardian-%'));
+  });
+
+  it('links a guardian to a student and returns it in the detail view', async () => {
+    const { guardians } = await import('@shared/schema');
+    const { gradeLevelId } = await seedSuperAdminAndGrade();
+    const app = createApp({ emailAdapter: createFakeEmailAdapter() });
+    const cookie = await loginAs(app, SUPER_EMAIL);
+
+    const student = await request(app)
+      .post('/api/students')
+      .set('Cookie', cookie)
+      .send({ name: TEST_STUDENT_NAME, phone: TEST_STUDENT_PHONE, gradeLevelId });
+    const [guardian] = await db
+      .insert(guardians)
+      .values({ name: 'test-student-guardian-김보호', phoneNormalized: '01011112222' })
+      .returning();
+
+    const linked = await request(app)
+      .post(`/api/students/${student.body.data.student.id}/guardians`)
+      .set('Cookie', cookie)
+      .send({ guardianId: guardian!.id, relationship: '모', isPrimary: true });
+
+    expect(linked.status).toBe(200);
+    expect(linked.body.data.isPrimary).toBe(true);
+
+    const detail = await request(app).get(`/api/students/${student.body.data.student.id}`).set('Cookie', cookie);
+    expect(detail.body.data.guardians).toHaveLength(1);
+    expect(detail.body.data.guardians[0].guardian.name).toBe('test-student-guardian-김보호');
+  });
+
+  it('rejects linking the same guardian to the same student twice', async () => {
+    const { guardians } = await import('@shared/schema');
+    const { gradeLevelId } = await seedSuperAdminAndGrade();
+    const app = createApp({ emailAdapter: createFakeEmailAdapter() });
+    const cookie = await loginAs(app, SUPER_EMAIL);
+
+    const student = await request(app)
+      .post('/api/students')
+      .set('Cookie', cookie)
+      .send({ name: TEST_STUDENT_NAME, phone: TEST_STUDENT_PHONE, gradeLevelId });
+    const [guardian] = await db
+      .insert(guardians)
+      .values({ name: 'test-student-guardian-이보호', phoneNormalized: '01033334444' })
+      .returning();
+
+    await request(app).post(`/api/students/${student.body.data.student.id}/guardians`).set('Cookie', cookie).send({ guardianId: guardian!.id });
+    const secondAttempt = await request(app)
+      .post(`/api/students/${student.body.data.student.id}/guardians`)
+      .set('Cookie', cookie)
+      .send({ guardianId: guardian!.id });
+
+    expect(secondAttempt.status).toBe(409);
+    expect(secondAttempt.body.error.code).toBe('DUPLICATE_LINK');
+  });
+
+  it('moving isPrimary to a new link unsets the old primary', async () => {
+    const { guardians } = await import('@shared/schema');
+    const { gradeLevelId } = await seedSuperAdminAndGrade();
+    const app = createApp({ emailAdapter: createFakeEmailAdapter() });
+    const cookie = await loginAs(app, SUPER_EMAIL);
+
+    const student = await request(app)
+      .post('/api/students')
+      .set('Cookie', cookie)
+      .send({ name: TEST_STUDENT_NAME, phone: TEST_STUDENT_PHONE, gradeLevelId });
+    const [guardianA] = await db
+      .insert(guardians)
+      .values({ name: 'test-student-guardian-박부모A', phoneNormalized: '01055556666' })
+      .returning();
+    const [guardianB] = await db
+      .insert(guardians)
+      .values({ name: 'test-student-guardian-박부모B', phoneNormalized: '01077778888' })
+      .returning();
+
+    const linkA = await request(app)
+      .post(`/api/students/${student.body.data.student.id}/guardians`)
+      .set('Cookie', cookie)
+      .send({ guardianId: guardianA!.id, isPrimary: true });
+
+    const linkB = await request(app)
+      .post(`/api/students/${student.body.data.student.id}/guardians`)
+      .set('Cookie', cookie)
+      .send({ guardianId: guardianB!.id, isPrimary: true });
+
+    expect(linkB.body.data.isPrimary).toBe(true);
+
+    const detail = await request(app).get(`/api/students/${student.body.data.student.id}`).set('Cookie', cookie);
+    const linkAAfter = detail.body.data.guardians.find((g: { id: string }) => g.id === linkA.body.data.id);
+    expect(linkAAfter.isPrimary).toBe(false);
   });
 });
