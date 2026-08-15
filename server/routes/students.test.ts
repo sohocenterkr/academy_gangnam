@@ -146,3 +146,83 @@ describe('students routes — list and create', () => {
     expect(statusResult.body.data.find((s: { id: string; name: string }) => s.name.includes('*'))).toBeUndefined();
   });
 });
+
+describe('students routes — detail and update', () => {
+  afterEach(async () => {
+    await cleanup();
+  });
+
+  it('returns 404 for a missing student', async () => {
+    await seedSuperAdminAndGrade();
+    const app = createApp({ emailAdapter: createFakeEmailAdapter() });
+    const cookie = await loginAs(app, SUPER_EMAIL);
+
+    const response = await request(app).get('/api/students/00000000-0000-0000-0000-000000000000').set('Cookie', cookie);
+    expect(response.status).toBe(404);
+  });
+
+  it('returns full unmasked data with an empty guardians array on the detail endpoint', async () => {
+    const { gradeLevelId } = await seedSuperAdminAndGrade();
+    const app = createApp({ emailAdapter: createFakeEmailAdapter() });
+    const cookie = await loginAs(app, SUPER_EMAIL);
+
+    const created = await request(app)
+      .post('/api/students')
+      .set('Cookie', cookie)
+      .send({ name: TEST_STUDENT_NAME, phone: TEST_STUDENT_PHONE, gradeLevelId });
+
+    const detail = await request(app).get(`/api/students/${created.body.data.student.id}`).set('Cookie', cookie);
+    expect(detail.status).toBe(200);
+    expect(detail.body.data.name).toBe(TEST_STUDENT_NAME);
+    expect(detail.body.data.phoneNormalized).toBe(TEST_STUDENT_PHONE);
+    expect(detail.body.data.guardians).toEqual([]);
+  });
+
+  it('updates a student with optimistic locking', async () => {
+    const { gradeLevelId } = await seedSuperAdminAndGrade();
+    const app = createApp({ emailAdapter: createFakeEmailAdapter() });
+    const cookie = await loginAs(app, SUPER_EMAIL);
+
+    const created = await request(app)
+      .post('/api/students')
+      .set('Cookie', cookie)
+      .send({ name: TEST_STUDENT_NAME, phone: TEST_STUDENT_PHONE, gradeLevelId });
+
+    const edited = await request(app)
+      .patch(`/api/students/${created.body.data.student.id}`)
+      .set('Cookie', cookie)
+      .send({ specialNotes: '수정된 메모', expectedUpdatedAt: created.body.data.student.updatedAt });
+
+    expect(edited.status).toBe(200);
+    expect(edited.body.data.status).toBe('updated');
+    expect(edited.body.data.student.specialNotes).toBe('수정된 메모');
+
+    const staleEdit = await request(app)
+      .patch(`/api/students/${created.body.data.student.id}`)
+      .set('Cookie', cookie)
+      .send({ specialNotes: '또 수정', expectedUpdatedAt: created.body.data.student.updatedAt });
+
+    expect(staleEdit.status).toBe(409);
+    expect(staleEdit.body.error.code).toBe('VERSION_CONFLICT');
+  });
+
+  it('warns about a duplicate phone on update, until confirmDuplicate is set', async () => {
+    const { gradeLevelId } = await seedSuperAdminAndGrade();
+    const app = createApp({ emailAdapter: createFakeEmailAdapter() });
+    const cookie = await loginAs(app, SUPER_EMAIL);
+
+    await request(app).post('/api/students').set('Cookie', cookie).send({ name: TEST_STUDENT_NAME, phone: TEST_STUDENT_PHONE, gradeLevelId });
+    const second = await request(app)
+      .post('/api/students')
+      .set('Cookie', cookie)
+      .send({ name: 'test-student-박민수', phone: '01077776666', gradeLevelId, confirmDuplicate: true });
+
+    const attempt = await request(app)
+      .patch(`/api/students/${second.body.data.student.id}`)
+      .set('Cookie', cookie)
+      .send({ phone: TEST_STUDENT_PHONE, expectedUpdatedAt: second.body.data.student.updatedAt });
+
+    expect(attempt.status).toBe(200);
+    expect(attempt.body.data.status).toBe('duplicate_warning');
+  });
+});
