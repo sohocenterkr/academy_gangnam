@@ -190,6 +190,57 @@ describe('enrollments routes', () => {
     expect(ended.body.data.actualEndDate).toBeTruthy();
   });
 
+  it('rejects a PATCH that moves an enrollment into overlap with another, and accepts it with confirmOverlap', async () => {
+    const { studentId, courseId } = await seedFixtures();
+    const app = createApp({ emailAdapter: createFakeEmailAdapter() });
+    const cookie = await loginAs(app, SUPER_EMAIL);
+
+    const first = await request(app)
+      .post('/api/enrollments')
+      .set('Cookie', cookie)
+      .send({ studentId, courseId, startDate: '2026-01-01', plannedEndDate: '2026-03-31' });
+    expect(first.status).toBe(200);
+
+    const second = await request(app)
+      .post('/api/enrollments')
+      .set('Cookie', cookie)
+      .send({ studentId, courseId, startDate: '2026-04-01', plannedEndDate: '2026-06-30' });
+    expect(second.status).toBe(200);
+
+    const patchOverlap = await request(app)
+      .patch(`/api/enrollments/${second.body.data.id}`)
+      .set('Cookie', cookie)
+      .send({ startDate: '2026-02-01', expectedUpdatedAt: second.body.data.updatedAt });
+    expect(patchOverlap.status).toBe(409);
+    expect(patchOverlap.body.error.code).toBe('PERIOD_OVERLAP');
+
+    const patchConfirmed = await request(app)
+      .patch(`/api/enrollments/${second.body.data.id}`)
+      .set('Cookie', cookie)
+      .send({ startDate: '2026-02-01', confirmOverlap: true, expectedUpdatedAt: second.body.data.updatedAt });
+    expect(patchConfirmed.status).toBe(200);
+    expect(patchConfirmed.body.data.startDate).toBe('2026-02-01');
+  });
+
+  it('sets actualEndDate to today when PATCH transitions status to ended directly (not via /end)', async () => {
+    const { studentId, courseId } = await seedFixtures();
+    const app = createApp({ emailAdapter: createFakeEmailAdapter() });
+    const cookie = await loginAs(app, SUPER_EMAIL);
+
+    const created = await request(app)
+      .post('/api/enrollments')
+      .set('Cookie', cookie)
+      .send({ studentId, courseId, startDate: '2026-01-01' });
+
+    const patched = await request(app)
+      .patch(`/api/enrollments/${created.body.data.id}`)
+      .set('Cookie', cookie)
+      .send({ status: 'ended', expectedUpdatedAt: created.body.data.updatedAt });
+    expect(patched.status).toBe(200);
+    expect(patched.body.data.status).toBe('ended');
+    expect(patched.body.data.actualEndDate).toBeTruthy();
+  });
+
   it('cancels an enrollment, setting status to canceled', async () => {
     const { studentId, courseId } = await seedFixtures();
     const app = createApp({ emailAdapter: createFakeEmailAdapter() });

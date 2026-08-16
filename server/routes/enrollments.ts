@@ -28,6 +28,7 @@ const updateEnrollmentSchema = z.object({
   tuitionAmount: z.number().int().nonnegative().optional(),
   adjustmentNote: z.string().optional(),
   memo: z.string().optional(),
+  confirmOverlap: z.boolean().optional(),
   expectedUpdatedAt: z.iso.datetime(),
 });
 
@@ -163,10 +164,44 @@ export function createEnrollmentsRouter(deps: EnrollmentsRouterDeps): Router {
       return;
     }
 
-    const { expectedUpdatedAt, ...changes } = parsed;
+    const { expectedUpdatedAt, confirmOverlap, ...changes } = parsed;
+
+    // Only a change to the period or status can newly create an overlap; ending/canceling never can.
+    const newStatus = changes.status ?? before.status;
+    const willBeOpen = (OPEN_STATUSES as readonly string[]).includes(newStatus);
+    const periodOrStatusChanged = changes.startDate !== undefined || changes.plannedEndDate !== undefined || changes.status !== undefined;
+
+    if (willBeOpen && periodOrStatusChanged && !confirmOverlap) {
+      const overlaps = await findOverlap(
+        before.studentId,
+        before.courseId,
+        changes.startDate ?? before.startDate,
+        changes.plannedEndDate ?? before.plannedEndDate ?? undefined,
+        id
+      );
+      if (overlaps.length > 0) {
+        res.status(409).json({
+          error: {
+            code: 'PERIOD_OVERLAP',
+            message: '기존 수강 기간과 겹칩니다. 계속하려면 확인이 필요합니다.',
+            requestId: req.requestId,
+          },
+          data: { conflicts: overlaps.map((o) => ({ id: o.id, startDate: o.startDate, plannedEndDate: o.plannedEndDate })) },
+        });
+        return;
+      }
+    }
+
+    // Keep actualEndDate consistent with POST /:id/end regardless of which route is used to end
+    // (or cancel) an enrollment: it represents "when did they stop attending."
+    const actualEndDateChange =
+      changes.status !== undefined && changes.status !== before.status && (changes.status === 'ended' || changes.status === 'canceled')
+        ? { actualEndDate: getTodayKST() }
+        : {};
+
     const [updated] = await db
       .update(enrollments)
-      .set({ ...changes, updatedBy: req.admin!.id, updatedAt: new Date() })
+      .set({ ...changes, ...actualEndDateChange, updatedBy: req.admin!.id, updatedAt: new Date() })
       .where(and(eq(enrollments.id, id), eq(enrollments.updatedAt, new Date(expectedUpdatedAt))))
       .returning();
     if (!updated) {
