@@ -6,7 +6,7 @@ import { PERMISSIONS } from '@shared/permissions';
 import { maskName } from '@shared/masking';
 import { maskPhone, normalizePhone } from '@shared/phone';
 import { db } from '../db';
-import { students, studentGuardians, guardians, studentCheckinPhones } from '@shared/schema';
+import { students, studentGuardians, guardians, studentCheckinPhones, enrollments } from '@shared/schema';
 import { parseBody } from '../utils/validate';
 import { createRequireAuth } from '../middleware/auth';
 import { createRequirePermission } from '../middleware/permissions';
@@ -513,6 +513,23 @@ export function createStudentsRouter(deps: StudentsRouterDeps): Router {
     });
 
     res.json({ data: restored, meta: { requestId: req.requestId, kstTimestamp: getNowKSTISOString() } });
+  });
+
+  router.get('/:id/enrollments', requireAuth, requireStudentsManage, async (req, res) => {
+    const id = req.params.id;
+    if (!id || Array.isArray(id)) {
+      res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: '잘못된 요청입니다.', requestId: req.requestId } });
+      return;
+    }
+
+    const [student] = await db.select().from(students).where(eq(students.id, id));
+    if (!student) {
+      res.status(404).json({ error: { code: 'NOT_FOUND', message: '학생을 찾을 수 없습니다.', requestId: req.requestId } });
+      return;
+    }
+
+    const rows = await db.select().from(enrollments).where(eq(enrollments.studentId, id));
+    res.json({ data: rows, meta: { requestId: req.requestId, kstTimestamp: getNowKSTISOString() } });
   });
 
   router.post('/:id/guardians', requireAuth, requireStudentsManage, async (req, res) => {
