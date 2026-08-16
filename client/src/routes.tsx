@@ -9,6 +9,7 @@ import { GuardianListPage } from './features/guardians/GuardianListPage';
 import { GuardianDetailPage } from './features/guardians/GuardianDetailPage';
 import { StudentListPage } from './features/students/StudentListPage';
 import { StudentDetailPage } from './features/students/StudentDetailPage';
+import { CheckInKioskPage } from './features/checkin/CheckInKioskPage';
 import { ProtectedRoute } from './components/layout/ProtectedRoute';
 
 export function AppRoutes() {
@@ -16,6 +17,7 @@ export function AppRoutes() {
     <Switch>
       <Route path="/" component={DevHomePage} />
       <Route path="/login" component={LoginPage} />
+      <Route path="/check-in" component={CheckInKioskPage} />
       <Route path="/admin">
         <ProtectedRoute>
           <AdminHomePage />
