@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { Router } from 'express';
 import { z } from 'zod';
 import { getNowKSTISOString } from '@shared/kst';
@@ -16,7 +16,7 @@ const updateLinkSchema = z.object({
   isPrimary: z.boolean().optional(),
   receiveMessages: z.boolean().optional(),
   useForCheckin: z.boolean().optional(),
-  expectedUpdatedAt: z.string(),
+  expectedUpdatedAt: z.iso.datetime(),
 });
 
 function isUniqueViolation(error: unknown, indexName: string): boolean {
@@ -58,14 +58,7 @@ export function createStudentGuardiansRouter(deps: StudentGuardiansRouterDeps): 
       res.status(404).json({ error: { code: 'NOT_FOUND', message: '연결 정보를 찾을 수 없습니다.', requestId: req.requestId } });
       return;
     }
-    if (before.updatedAt.toISOString() !== parsed.expectedUpdatedAt) {
-      res.status(409).json({
-        error: { code: 'VERSION_CONFLICT', message: '다른 곳에서 이미 변경되었습니다. 새로고침 후 다시 시도해 주세요.', requestId: req.requestId },
-      });
-      return;
-    }
-
-    const { expectedUpdatedAt: _expected, ...changes } = parsed;
+    const { expectedUpdatedAt, ...changes } = parsed;
 
     let updated;
     try {
@@ -76,7 +69,7 @@ export function createStudentGuardiansRouter(deps: StudentGuardiansRouterDeps): 
         const [row] = await tx
           .update(studentGuardians)
           .set({ ...changes, updatedAt: new Date() })
-          .where(eq(studentGuardians.id, id))
+          .where(and(eq(studentGuardians.id, id), eq(studentGuardians.updatedAt, new Date(expectedUpdatedAt))))
           .returning();
         return row;
       });
@@ -90,7 +83,9 @@ export function createStudentGuardiansRouter(deps: StudentGuardiansRouterDeps): 
       throw error;
     }
     if (!updated) {
-      res.status(500).json({ error: { code: 'INTERNAL_ERROR', message: '수정하지 못했습니다.', requestId: req.requestId } });
+      res.status(409).json({
+        error: { code: 'VERSION_CONFLICT', message: '다른 곳에서 이미 변경되었습니다. 새로고침 후 다시 시도해 주세요.', requestId: req.requestId },
+      });
       return;
     }
 
