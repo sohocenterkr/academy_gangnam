@@ -197,3 +197,65 @@ export const studentGuardians = pgTable(
       .where(sql`${table.isPrimary} = true`),
   ]
 );
+
+export const checkIns = pgTable(
+  'check_ins',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    studentId: uuid('student_id')
+      .notNull()
+      .references(() => students.id),
+    checkInDate: date('check_in_date').notNull(),
+    checkInAt: timestamp('check_in_at', { withTimezone: true }).notNull(),
+    source: text('source', { enum: ['kiosk', 'admin', 'import'] }).notNull(),
+    status: text('status', { enum: ['active', 'canceled'] }).notNull().default('active'),
+    idempotencyKey: text('idempotency_key').notNull(),
+    exceptionReason: text('exception_reason'),
+    isException: boolean('is_exception').notNull().default(false),
+    createdBy: uuid('created_by').references(() => admins.id),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull(),
+  },
+  (table) => [
+    uniqueIndex('check_ins_idempotency_key_unique').on(table.idempotencyKey),
+    uniqueIndex('check_ins_student_date_active_unique')
+      .on(table.studentId, table.checkInDate)
+      .where(sql`${table.status} = 'active' AND ${table.isException} = false`),
+    index('check_ins_date_at_idx').on(table.checkInDate, table.checkInAt),
+    index('check_ins_student_date_idx').on(table.studentId, table.checkInDate),
+  ]
+);
+
+export const checkInChangeLogs = pgTable('check_in_change_logs', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  checkInId: uuid('check_in_id')
+    .notNull()
+    .references(() => checkIns.id),
+  action: text('action', { enum: ['create', 'update', 'cancel', 'exception_create'] }).notNull(),
+  beforeData: jsonb('before_data'),
+  afterData: jsonb('after_data'),
+  reason: text('reason'),
+  adminId: uuid('admin_id').references(() => admins.id),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
+});
+
+export const studentCheckinPhones = pgTable(
+  'student_checkin_phones',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    studentId: uuid('student_id')
+      .notNull()
+      .references(() => students.id),
+    sourceType: text('source_type', { enum: ['student', 'guardian'] }).notNull(),
+    sourceId: uuid('source_id').notNull(),
+    phoneNormalized: text('phone_normalized').notNull(),
+    phoneLast4: text('phone_last4').notNull(),
+    isActive: boolean('is_active').notNull().default(true),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull(),
+  },
+  (table) => [
+    index('student_checkin_phones_last4_active_idx').on(table.phoneLast4, table.isActive),
+    index('student_checkin_phones_student_active_idx').on(table.studentId, table.isActive),
+  ]
+);
