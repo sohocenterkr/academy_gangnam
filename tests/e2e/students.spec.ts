@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { eq } from 'drizzle-orm';
 import { db } from '../../server/db';
-import { gradeLevels, students } from '../../shared/schema';
+import { gradeLevels, students, studentCheckinPhones } from '../../shared/schema';
 
 test('logs in, creates a student, links and unlinks a guardian, and confirms a duplicate-phone warning', async ({ page }) => {
   const email = process.env.INITIAL_ADMIN_EMAIL;
@@ -103,8 +103,14 @@ test('logs in, creates a student, links and unlinks a guardian, and confirms a d
   // its own zero-history fixture rows (the grade level and the one student that referenced it)
   // directly via the DB once the UI assertions above are done, instead of leaking them into the
   // shared dev DB on every run.
+  // `student_checkin_phones` rows are synced automatically on student create (Stage 6) and hold
+  // their own FK to `students`, so they must be deleted before the student row itself.
   const [gradeRow] = await db.select({ id: gradeLevels.id }).from(gradeLevels).where(eq(gradeLevels.name, gradeName));
   if (gradeRow) {
+    const gradeStudents = await db.select({ id: students.id }).from(students).where(eq(students.gradeLevelId, gradeRow.id));
+    for (const { id: studentId } of gradeStudents) {
+      await db.delete(studentCheckinPhones).where(eq(studentCheckinPhones.studentId, studentId));
+    }
     await db.delete(students).where(eq(students.gradeLevelId, gradeRow.id));
     await db.delete(gradeLevels).where(eq(gradeLevels.id, gradeRow.id));
   }
