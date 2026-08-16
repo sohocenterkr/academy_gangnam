@@ -12,6 +12,7 @@ import { StudentDetailPage } from './features/students/StudentDetailPage';
 import { CheckInKioskPage } from './features/checkin/CheckInKioskPage';
 import { AdminCheckInsPage } from './features/checkin/AdminCheckInsPage';
 import { InstructorListPage } from './features/instructors/InstructorListPage';
+import { CourseListPage } from './features/courses/CourseListPage';
 import { ProtectedRoute } from './components/layout/ProtectedRoute';
 
 export function AppRoutes() {
@@ -68,6 +69,11 @@ export function AppRoutes() {
       <Route path="/admin/instructors">
         <ProtectedRoute>
           <InstructorListPage />
+        </ProtectedRoute>
+      </Route>
+      <Route path="/admin/courses">
+        <ProtectedRoute>
+          <CourseListPage />
         </ProtectedRoute>
       </Route>
     </Switch>
