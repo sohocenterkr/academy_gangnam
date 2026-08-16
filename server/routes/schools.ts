@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { Router } from 'express';
 import { z } from 'zod';
 import { getNowKSTISOString } from '@shared/kst';
@@ -21,7 +21,7 @@ const updateSchoolSchema = z.object({
   region: z.string().optional(),
   sortOrder: z.number().int().optional(),
   isActive: z.boolean().optional(),
-  expectedUpdatedAt: z.string(),
+  expectedUpdatedAt: z.iso.datetime(),
 });
 
 function isForeignKeyViolation(error: unknown): boolean {
@@ -89,6 +89,8 @@ export function createSchoolsRouter(deps: SchoolsRouterDeps): Router {
           sortOrder: parsed.sortOrder ?? 0,
           createdBy: req.admin!.id,
           updatedBy: req.admin!.id,
+          createdAt: new Date(),
+          updatedAt: new Date(),
         })
         .returning();
     } catch (error) {
@@ -140,21 +142,15 @@ export function createSchoolsRouter(deps: SchoolsRouterDeps): Router {
       res.status(404).json({ error: { code: 'NOT_FOUND', message: '학교를 찾을 수 없습니다.', requestId: req.requestId } });
       return;
     }
-    if (before.updatedAt.toISOString() !== parsed.expectedUpdatedAt) {
-      res.status(409).json({
-        error: { code: 'VERSION_CONFLICT', message: '다른 곳에서 이미 변경되었습니다. 새로고침 후 다시 시도해 주세요.', requestId: req.requestId },
-      });
-      return;
-    }
 
-    const { expectedUpdatedAt: _expected, ...changes } = parsed;
+    const { expectedUpdatedAt, ...changes } = parsed;
 
     let updated;
     try {
       [updated] = await db
         .update(schools)
         .set({ ...changes, updatedBy: req.admin!.id, updatedAt: new Date() })
-        .where(eq(schools.id, id))
+        .where(and(eq(schools.id, id), eq(schools.updatedAt, new Date(expectedUpdatedAt))))
         .returning();
     } catch (error) {
       if (isUniqueViolation(error, 'schools_active_name_unique')) {
@@ -171,7 +167,9 @@ export function createSchoolsRouter(deps: SchoolsRouterDeps): Router {
       throw error;
     }
     if (!updated) {
-      res.status(500).json({ error: { code: 'INTERNAL_ERROR', message: '학교를 수정하지 못했습니다.', requestId: req.requestId } });
+      res.status(409).json({
+        error: { code: 'VERSION_CONFLICT', message: '다른 곳에서 이미 변경되었습니다. 새로고침 후 다시 시도해 주세요.', requestId: req.requestId },
+      });
       return;
     }
 

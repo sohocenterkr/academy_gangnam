@@ -158,4 +158,32 @@ describe('academy settings routes', () => {
       await restoreAcademySettings(snapshot);
     }
   });
+
+  it('rejects concurrent updates atomically — only one of two simultaneous PATCHes succeeds', async () => {
+    await seedSuperAdmin();
+    const app = createApp({ emailAdapter: createFakeEmailAdapter() });
+    const cookie = await loginAs(app, SUPER_EMAIL);
+
+    const before = await request(app).get('/api/settings/academy').set('Cookie', cookie);
+    const snapshot = await snapshotAcademySettings();
+    const expectedUpdatedAt = before.body.data.updatedAt;
+
+    try {
+      // Warm up the DB connection pool with a concurrent pair first — a cold pool
+      // opens a brand-new connection for the second of two simultaneous queries,
+      // which takes long enough (network + TLS setup) that the two PATCHes below
+      // would otherwise run sequentially instead of actually racing.
+      await Promise.all([request(app).get('/api/settings/academy').set('Cookie', cookie), request(app).get('/api/settings/academy').set('Cookie', cookie)]);
+
+      const [first, second] = await Promise.all([
+        request(app).patch('/api/settings/academy').set('Cookie', cookie).send({ senderName: '보낸이1', expectedUpdatedAt }),
+        request(app).patch('/api/settings/academy').set('Cookie', cookie).send({ senderName: '보낸이2', expectedUpdatedAt }),
+      ]);
+
+      const statuses = [first.status, second.status].sort();
+      expect(statuses).toEqual([200, 409]);
+    } finally {
+      await restoreAcademySettings(snapshot);
+    }
+  });
 });

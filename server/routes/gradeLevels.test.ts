@@ -126,4 +126,33 @@ describe('grade levels routes', () => {
     expect(deactivated.status).toBe(200);
     expect(deactivated.body.data.isActive).toBe(false);
   });
+
+  it('rejects concurrent updates atomically — only one of two simultaneous PATCHes succeeds', async () => {
+    await seedSuperAdmin();
+    const app = createApp({ emailAdapter: createFakeEmailAdapter() });
+    const cookie = await loginAs(app, SUPER_EMAIL);
+
+    const created = await request(app).post('/api/grade-levels').set('Cookie', cookie).send({ name: TEST_GRADE_NAME });
+    const expectedUpdatedAt = created.body.data.updatedAt;
+
+    // Warm up the DB connection pool with a concurrent pair first — a cold pool
+    // opens a brand-new connection for the second of two simultaneous queries,
+    // which takes long enough (network + TLS setup) that the two PATCHes below
+    // would otherwise run sequentially instead of actually racing.
+    await Promise.all([request(app).get('/api/grade-levels').set('Cookie', cookie), request(app).get('/api/grade-levels').set('Cookie', cookie)]);
+
+    const [first, second] = await Promise.all([
+      request(app)
+        .patch(`/api/grade-levels/${created.body.data.id}`)
+        .set('Cookie', cookie)
+        .send({ sortOrder: 1, expectedUpdatedAt }),
+      request(app)
+        .patch(`/api/grade-levels/${created.body.data.id}`)
+        .set('Cookie', cookie)
+        .send({ sortOrder: 2, expectedUpdatedAt }),
+    ]);
+
+    const statuses = [first.status, second.status].sort();
+    expect(statuses).toEqual([200, 409]);
+  });
 });

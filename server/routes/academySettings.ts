@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { Router } from 'express';
 import { z } from 'zod';
 import { getNowKSTISOString } from '@shared/kst';
@@ -17,14 +17,14 @@ const updateAcademySettingsSchema = z.object({
   phoneNormalized: z.string().optional(),
   address: z.string().optional(),
   senderName: z.string().optional(),
-  expectedUpdatedAt: z.string(),
+  expectedUpdatedAt: z.iso.datetime(),
 });
 
 async function getOrCreateAcademySettings() {
   const [existing] = await db.select().from(academySettings).limit(1);
   if (existing) return existing;
 
-  const [created] = await db.insert(academySettings).values({ academyName: DEFAULT_ACADEMY_NAME }).returning();
+  const [created] = await db.insert(academySettings).values({ academyName: DEFAULT_ACADEMY_NAME, updatedAt: new Date() }).returning();
   if (!created) {
     throw new Error('Failed to create the default academy settings row.');
   }
@@ -50,23 +50,17 @@ export function createAcademySettingsRouter(deps: AcademySettingsRouterDeps): Ro
     if (!parsed) return;
 
     const settings = await getOrCreateAcademySettings();
-    if (settings.updatedAt.toISOString() !== parsed.expectedUpdatedAt) {
-      res.status(409).json({
-        error: { code: 'VERSION_CONFLICT', message: '다른 곳에서 이미 변경되었습니다. 새로고침 후 다시 시도해 주세요.', requestId: req.requestId },
-      });
-      return;
-    }
 
-    const { expectedUpdatedAt: _expected, ...changes } = parsed;
+    const { expectedUpdatedAt, ...changes } = parsed;
 
     const [updated] = await db
       .update(academySettings)
       .set({ ...changes, updatedBy: req.admin!.id, updatedAt: new Date() })
-      .where(eq(academySettings.id, settings.id))
+      .where(and(eq(academySettings.id, settings.id), eq(academySettings.updatedAt, new Date(expectedUpdatedAt))))
       .returning();
     if (!updated) {
-      res.status(500).json({
-        error: { code: 'INTERNAL_ERROR', message: '설정을 저장하지 못했습니다.', requestId: req.requestId },
+      res.status(409).json({
+        error: { code: 'VERSION_CONFLICT', message: '다른 곳에서 이미 변경되었습니다. 새로고침 후 다시 시도해 주세요.', requestId: req.requestId },
       });
       return;
     }
