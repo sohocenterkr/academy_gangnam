@@ -1,4 +1,4 @@
-import { and, count, eq, isNull, like } from 'drizzle-orm';
+import { and, count, eq, ilike, isNull } from 'drizzle-orm';
 import { Router } from 'express';
 import { z } from 'zod';
 import { getNowKSTISOString } from '@shared/kst';
@@ -25,7 +25,22 @@ const createCourseSchema = z.object({
   description: z.string().optional(),
 });
 
-const updateCourseSchema = createCourseSchema.partial().extend({
+// NOTE: deliberately NOT derived via createCourseSchema.partial() — in the installed Zod 4,
+// .partial() does not suppress an inner .default(), so a partial() of createCourseSchema would
+// still produce targetGradeIds: [] when the field is omitted from a PATCH body, silently wiping
+// the course's real target grade levels on every partial update that doesn't touch this field.
+const updateCourseSchema = z.object({
+  code: z.string().min(1).optional(),
+  name: z.string().min(1).optional(),
+  category: z.string().optional(),
+  targetGradeIds: z.array(z.string()).optional(),
+  instructorId: z.string().optional(),
+  classroom: z.string().optional(),
+  capacity: z.number().int().positive().optional(),
+  baseFee: z.number().int().nonnegative().optional(),
+  startDate: z.string().optional(),
+  endDate: z.string().optional(),
+  description: z.string().optional(),
   expectedUpdatedAt: z.iso.datetime(),
 });
 
@@ -72,7 +87,7 @@ export function createCoursesRouter(deps: CoursesRouterDeps): Router {
     const conditions = [isNull(courses.deletedAt)];
     if (query.status) conditions.push(eq(courses.status, query.status));
     if (query.instructorId) conditions.push(eq(courses.instructorId, query.instructorId));
-    if (query.name) conditions.push(like(courses.name, `%${query.name}%`));
+    if (query.name) conditions.push(ilike(courses.name, `%${query.name}%`));
 
     const rows = await db.select().from(courses).where(and(...conditions));
     res.json({ data: rows, meta: { requestId: req.requestId, kstTimestamp: getNowKSTISOString() } });
@@ -87,7 +102,15 @@ export function createCoursesRouter(deps: CoursesRouterDeps): Router {
     try {
       [created] = await db
         .insert(courses)
-        .values({ ...parsed, status: 'recruiting', createdAt: now, updatedAt: now, createdBy: req.admin!.id, updatedBy: req.admin!.id })
+        .values({
+          ...parsed,
+          targetGradeIds: parsed.targetGradeIds ?? [],
+          status: 'recruiting',
+          createdAt: now,
+          updatedAt: now,
+          createdBy: req.admin!.id,
+          updatedBy: req.admin!.id,
+        })
         .returning();
     } catch (error) {
       if (isUniqueViolation(error, 'courses_code_unique')) {

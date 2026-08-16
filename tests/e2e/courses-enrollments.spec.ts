@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { eq } from 'drizzle-orm';
+import { getTodayKST } from '../../shared/kst';
 import { db } from '../../server/db';
 import {
   gradeLevels,
@@ -89,7 +90,7 @@ test('logs in, enrolls a student in a course, verifies it on the course detail p
   const courseId = courseDetailUrl.split('/admin/courses/')[1];
   if (!courseId) throw new Error('Failed to extract courseId from URL');
 
-  await expect(page.getByText('현재 수강 인원: 0명')).toBeVisible();
+  await expect(page.getByText('활성 수강 등록: 0건')).toBeVisible();
 
   // Weekly schedule.
   await page.getByLabel('요일').selectOption({ label: '월' });
@@ -102,14 +103,14 @@ test('logs in, enrolls a student in a course, verifies it on the course detail p
   // One exception (휴강). Per the known scope limitation, this only needs to be visible within
   // this same page session — there is no list endpoint to reload it from.
   await page.getByLabel('구분').selectOption({ label: '휴강' });
-  const exceptionDate = new Date().toISOString().slice(0, 10);
+  const exceptionDate = getTodayKST();
   await page.getByLabel('날짜').fill(exceptionDate);
   await page.getByLabel('사유').fill('e2e 테스트 휴강');
   await page.getByRole('button', { name: '휴강·보강 추가' }).click();
   await expect(page.getByText('e2e 테스트 휴강')).toBeVisible();
 
   // Enroll the student.
-  const enrollStartDate = new Date().toISOString().slice(0, 10);
+  const enrollStartDate = getTodayKST();
   await page.getByLabel('학생 ID').fill(studentId);
   await page.getByLabel('시작일').fill(enrollStartDate);
   await page.getByLabel('수강료').fill('300000');
@@ -122,7 +123,7 @@ test('logs in, enrolls a student in a course, verifies it on the course detail p
   // reloads the enrollment list. This matches the project's "refresh is user-triggered only"
   // rule (no auto real-time UI polling), so a reload is needed to observe the updated count.
   await page.reload();
-  await expect(page.getByText('현재 수강 인원: 1명')).toBeVisible();
+  await expect(page.getByText('활성 수강 등록: 1건')).toBeVisible();
 
   // Trigger the overlap warning on purpose with a second, overlapping enrollment for the same
   // student/course, then confirm past it via the "그래도 등록" button.
@@ -137,14 +138,14 @@ test('logs in, enrolls a student in a course, verifies it on the course detail p
   await expect(enrollmentRows).toHaveCount(2);
 
   await page.reload();
-  await expect(page.getByText('현재 수강 인원: 2명')).toBeVisible();
+  await expect(page.getByText('활성 수강 등록: 2건')).toBeVisible();
 
   // End one of the two enrollments and confirm the active count drops back to 1.
   await enrollmentRows.first().getByRole('button', { name: '종료' }).click();
   await expect(page.getByText(/학생 ID:.*상태: ended/)).toBeVisible();
 
   await page.reload();
-  await expect(page.getByText('현재 수강 인원: 1명')).toBeVisible();
+  await expect(page.getByText('활성 수강 등록: 1건')).toBeVisible();
 
   // The client has no enrollment-history UI on the student detail page yet (out of scope for
   // this stage's task list), so confirm history preservation by calling the API directly —

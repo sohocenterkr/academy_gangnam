@@ -243,7 +243,7 @@ export function CourseDetailPage() {
       <p className="text-gray-600">
         {course.code} {course.category && <span className="ml-2">{course.category}</span>}
       </p>
-      <p className="text-sm text-gray-500">현재 수강 인원: {course.activeEnrollmentCount}명</p>
+      <p className="text-sm text-gray-500">활성 수강 등록: {course.activeEnrollmentCount}건</p>
 
       {error && (
         <p role="alert" className="mt-2 text-sm text-red-600">

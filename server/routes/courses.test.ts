@@ -162,6 +162,27 @@ describe('courses routes', () => {
     expect(stale.body.error.code).toBe('VERSION_CONFLICT');
   });
 
+  it('does not wipe targetGradeIds on a partial PATCH that omits the field', async () => {
+    await seedAdmin();
+    const app = createApp({ emailAdapter: createFakeEmailAdapter() });
+    const cookie = await loginAs(app, SUPER_EMAIL);
+
+    const created = await request(app)
+      .post('/api/courses')
+      .set('Cookie', cookie)
+      .send({ code: `${CODE_PREFIX}grades-1`, name: '학년반', targetGradeIds: ['grade-a', 'grade-b'] });
+    expect(created.status).toBe(200);
+    expect(created.body.data.targetGradeIds).toEqual(['grade-a', 'grade-b']);
+
+    const updated = await request(app)
+      .patch(`/api/courses/${created.body.data.id}`)
+      .set('Cookie', cookie)
+      .send({ name: '학년반 개명', expectedUpdatedAt: created.body.data.updatedAt });
+    expect(updated.status).toBe(200);
+    expect(updated.body.data.name).toBe('학년반 개명');
+    expect(updated.body.data.targetGradeIds).toEqual(['grade-a', 'grade-b']);
+  });
+
   it('transitions status from recruiting to closed and logs the change', async () => {
     await seedAdmin();
     const app = createApp({ emailAdapter: createFakeEmailAdapter() });
