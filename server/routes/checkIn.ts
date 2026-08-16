@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { getNowKSTISOString, getTodayKST } from '@shared/kst';
 import { maskName } from '@shared/masking';
 import { db } from '../db';
-import { checkIns, students, studentCheckinPhones } from '@shared/schema';
+import { checkIns, checkInChangeLogs, students, studentCheckinPhones } from '@shared/schema';
 import { parseBody } from '../utils/validate';
 import { createRateLimiter } from '../middleware/rateLimit';
 import { createSelectionToken, verifySelectionToken } from '../utils/checkinToken';
@@ -151,6 +151,16 @@ export function createCheckInRouter(deps: CheckInRouterDeps): Router {
       res.status(500).json({ error: { code: 'INTERNAL_ERROR', message: '등원 처리에 실패했습니다.', requestId: req.requestId } });
       return;
     }
+
+    await db.insert(checkInChangeLogs).values({
+      checkInId: created.id,
+      action: 'create',
+      beforeData: null,
+      afterData: { checkInAt: created.checkInAt, source: 'kiosk' },
+      reason: null,
+      adminId: null,
+      createdAt: new Date(),
+    });
 
     res.json({
       data: { status: 'confirmed', checkInAt: created.checkInAt.toISOString(), maskedName: maskName(student.name) },
