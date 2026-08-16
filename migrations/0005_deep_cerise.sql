@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX "student_checkin_phones_source_unique" ON "student_checkin_phones" USING btree ("student_id","source_type","source_id");

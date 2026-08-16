@@ -255,6 +255,7 @@ export const studentCheckinPhones = pgTable(
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull(),
   },
   (table) => [
+    uniqueIndex('student_checkin_phones_source_unique').on(table.studentId, table.sourceType, table.sourceId),
     index('student_checkin_phones_last4_active_idx').on(table.phoneLast4, table.isActive),
     index('student_checkin_phones_student_active_idx').on(table.studentId, table.isActive),
   ]

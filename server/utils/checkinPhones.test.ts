@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { afterEach, describe, expect, it } from 'vitest';
 import { db } from '../db';
 import { students, guardians, gradeLevels, studentCheckinPhones } from '@shared/schema';
@@ -112,5 +112,44 @@ describe('checkinPhones sync helpers', () => {
     expect(rows).toHaveLength(1);
     expect(rows[0]!.phoneNormalized).toBe('01077776666');
     expect(rows[0]!.phoneLast4).toBe('6666');
+  });
+
+  it('syncStudentOwnPhone is atomic: concurrent calls do not produce duplicate rows', async () => {
+    const { studentId } = await seedStudentAndGuardian();
+
+    // Fire two concurrent calls for the same student — both should upsert to the same row
+    await Promise.all([
+      db.transaction((tx) => syncStudentOwnPhone(tx, studentId, '01011110000')),
+      db.transaction((tx) => syncStudentOwnPhone(tx, studentId, '01099998888')),
+    ]);
+
+    // Verify exactly one row exists (not duplicates)
+    const rows = await db.select().from(studentCheckinPhones).where(eq(studentCheckinPhones.studentId, studentId));
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.sourceType).toBe('student');
+  });
+
+  it('upsertGuardianLinkPhone is atomic: concurrent calls do not produce duplicate rows', async () => {
+    const { studentId, guardianId } = await seedStudentAndGuardian();
+
+    // Fire two concurrent calls for the same student+guardian link
+    await Promise.all([
+      db.transaction((tx) => upsertGuardianLinkPhone(tx, studentId, guardianId, '01022220000', true)),
+      db.transaction((tx) => upsertGuardianLinkPhone(tx, studentId, guardianId, '01077776666', false)),
+    ]);
+
+    // Verify exactly one row exists (not duplicates)
+    const rows = await db
+      .select()
+      .from(studentCheckinPhones)
+      .where(
+        and(
+          eq(studentCheckinPhones.studentId, studentId),
+          eq(studentCheckinPhones.sourceType, 'guardian'),
+          eq(studentCheckinPhones.sourceId, guardianId)
+        )
+      );
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.sourceType).toBe('guardian');
   });
 });
