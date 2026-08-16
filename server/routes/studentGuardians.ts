@@ -64,7 +64,7 @@ export function createStudentGuardiansRouter(deps: StudentGuardiansRouterDeps): 
     try {
       updated = await db.transaction(async (tx) => {
         if (changes.isPrimary) {
-          await unsetOtherPrimaryGuardians(tx, before.studentId);
+          await unsetOtherPrimaryGuardians(tx, before.studentId, id);
         }
         const [row] = await tx
           .update(studentGuardians)

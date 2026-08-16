@@ -130,6 +130,33 @@ describe('student-guardians routes', () => {
     expect(statuses).toEqual([200, 409]);
   });
 
+  it('does not let a losing concurrent isPrimary update revert the winning request', async () => {
+    const { studentId, guardianId } = await seedFixtures();
+    const app = createApp({ emailAdapter: createFakeEmailAdapter() });
+    const cookie = await loginAs(app, SUPER_EMAIL);
+
+    const linked = await request(app).post(`/api/students/${studentId}/guardians`).set('Cookie', cookie).send({ guardianId });
+    const expectedUpdatedAt = linked.body.data.updatedAt;
+    const linkId = linked.body.data.id;
+
+    await Promise.all([request(app).get(`/api/students/${studentId}`).set('Cookie', cookie), request(app).get(`/api/students/${studentId}`).set('Cookie', cookie)]);
+
+    const [first, second] = await Promise.all([
+      request(app).patch(`/api/student-guardians/${linkId}`).set('Cookie', cookie).send({ isPrimary: true, relationship: '부', expectedUpdatedAt }),
+      request(app).patch(`/api/student-guardians/${linkId}`).set('Cookie', cookie).send({ isPrimary: true, relationship: '모', expectedUpdatedAt }),
+    ]);
+
+    const statuses = [first.status, second.status].sort();
+    expect(statuses).toEqual([200, 409]);
+
+    const winner = first.status === 200 ? first : second;
+
+    const detail = await request(app).get(`/api/students/${studentId}`).set('Cookie', cookie);
+    const currentLink = detail.body.data.guardians.find((g: { id: string }) => g.id === linkId);
+    expect(currentLink.isPrimary).toBe(true);
+    expect(currentLink.relationship).toBe(winner.body.data.relationship);
+  });
+
   it('unlinks a guardian from a student', async () => {
     const { studentId, guardianId } = await seedFixtures();
     const app = createApp({ emailAdapter: createFakeEmailAdapter() });
