@@ -10,6 +10,7 @@ import { GuardianDetailPage } from './features/guardians/GuardianDetailPage';
 import { StudentListPage } from './features/students/StudentListPage';
 import { StudentDetailPage } from './features/students/StudentDetailPage';
 import { CheckInKioskPage } from './features/checkin/CheckInKioskPage';
+import { AdminCheckInsPage } from './features/checkin/AdminCheckInsPage';
 import { ProtectedRoute } from './components/layout/ProtectedRoute';
 
 export function AppRoutes() {
@@ -56,6 +57,11 @@ export function AppRoutes() {
       <Route path="/admin/students/:studentId">
         <ProtectedRoute>
           <StudentDetailPage />
+        </ProtectedRoute>
+      </Route>
+      <Route path="/admin/check-ins">
+        <ProtectedRoute>
+          <AdminCheckInsPage />
         </ProtectedRoute>
       </Route>
     </Switch>

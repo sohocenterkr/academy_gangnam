@@ -34,6 +34,11 @@ export function AdminHomePage() {
             </Link>
           </li>
           <li>
+            <Link href="/admin/check-ins" className="text-blue-600 underline">
+              등원 조회
+            </Link>
+          </li>
+          <li>
             <Link href="/admin/profile" className="text-blue-600 underline">
               내 계정
             </Link>
