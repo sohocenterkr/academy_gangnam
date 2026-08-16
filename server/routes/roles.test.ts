@@ -87,7 +87,7 @@ async function cleanup(extraRoleNames: string[] = []) {
 
 describe('roles routes', () => {
   afterEach(async () => {
-    await cleanup(['test-roles-new-role']);
+    await cleanup(['test-roles-new-role', 'test-roles-new-role-a', 'test-roles-new-role-b']);
   });
 
   it('allows a super-admin to create a role', async () => {
@@ -184,5 +184,56 @@ describe('roles routes', () => {
 
     expect(response.status).toBe(403);
     expect(response.body.error.code).toBe('FORBIDDEN');
+  });
+
+  it('rejects concurrent updates atomically — only one of two simultaneous PATCHes succeeds', async () => {
+    await seedAdmins();
+    const app = createApp({ emailAdapter: createFakeEmailAdapter() });
+    const cookie = await loginAs(app, SUPER_EMAIL);
+
+    const created = await request(app)
+      .post('/api/roles')
+      .set('Cookie', cookie)
+      .send({ name: 'test-roles-new-role', permissions: [PERMISSIONS.ADMINS_MANAGE] });
+    const expectedUpdatedAt = created.body.data.updatedAt;
+
+    // Warm up the DB connection pool with a concurrent pair first — a cold pool
+    // opens a brand-new connection for the second of two simultaneous queries,
+    // which takes long enough (network + TLS setup) that the two PATCHes below
+    // would otherwise run sequentially instead of actually racing.
+    await Promise.all([request(app).get('/api/roles').set('Cookie', cookie), request(app).get('/api/roles').set('Cookie', cookie)]);
+
+    const [first, second] = await Promise.all([
+      request(app)
+        .patch(`/api/roles/${created.body.data.id}`)
+        .set('Cookie', cookie)
+        .send({ name: 'test-roles-new-role-a', expectedUpdatedAt }),
+      request(app)
+        .patch(`/api/roles/${created.body.data.id}`)
+        .set('Cookie', cookie)
+        .send({ name: 'test-roles-new-role-b', expectedUpdatedAt }),
+    ]);
+
+    const statuses = [first.status, second.status].sort();
+    expect(statuses).toEqual([200, 409]);
+  });
+
+  it('rejects a malformed expectedUpdatedAt with a clean 400', async () => {
+    await seedAdmins();
+    const app = createApp({ emailAdapter: createFakeEmailAdapter() });
+    const cookie = await loginAs(app, SUPER_EMAIL);
+
+    const created = await request(app)
+      .post('/api/roles')
+      .set('Cookie', cookie)
+      .send({ name: 'test-roles-new-role', permissions: [] });
+
+    const response = await request(app)
+      .patch(`/api/roles/${created.body.data.id}`)
+      .set('Cookie', cookie)
+      .send({ name: '새이름', expectedUpdatedAt: 'not-a-date' });
+
+    expect(response.status).toBe(400);
+    expect(response.body.error.code).toBe('VALIDATION_ERROR');
   });
 });

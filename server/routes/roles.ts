@@ -9,6 +9,7 @@ import { parseBody } from '../utils/validate';
 import { createRequireAuth } from '../middleware/auth';
 import { createRequirePermission } from '../middleware/permissions';
 import { writeAuditLog } from '../services/audit';
+import { sendVersionConflict } from '../utils/httpErrors';
 
 const createRoleSchema = z.object({
   name: z.string().min(1),
@@ -18,7 +19,7 @@ const createRoleSchema = z.object({
 const updateRoleSchema = z.object({
   name: z.string().min(1).optional(),
   permissions: z.array(z.string()).optional(),
-  expectedUpdatedAt: z.string(),
+  expectedUpdatedAt: z.iso.datetime(),
 });
 
 export interface RolesRouterDeps {
@@ -55,7 +56,7 @@ export function createRolesRouter(deps: RolesRouterDeps): Router {
 
     const [created] = await db
       .insert(roles)
-      .values({ name: parsed.name, permissions: parsed.permissions })
+      .values({ name: parsed.name, permissions: parsed.permissions, updatedAt: new Date() })
       .returning();
     if (!created) {
       res.status(500).json({
@@ -102,13 +103,6 @@ export function createRolesRouter(deps: RolesRouterDeps): Router {
       return;
     }
 
-    if (before.updatedAt.toISOString() !== parsed.expectedUpdatedAt) {
-      res.status(409).json({
-        error: { code: 'VERSION_CONFLICT', message: '다른 곳에서 이미 변경되었습니다. 새로고침 후 다시 시도해 주세요.', requestId: req.requestId },
-      });
-      return;
-    }
-
     if (
       parsed.permissions !== undefined &&
       parsed.permissions.includes(SUPER_ADMIN_WILDCARD_PERMISSION) &&
@@ -147,16 +141,14 @@ export function createRolesRouter(deps: RolesRouterDeps): Router {
       }
     }
 
-    const { expectedUpdatedAt: _expected, ...changes } = parsed;
+    const { expectedUpdatedAt, ...changes } = parsed;
     const [updated] = await db
       .update(roles)
       .set({ ...changes, updatedAt: new Date() })
-      .where(eq(roles.id, id))
+      .where(and(eq(roles.id, id), eq(roles.updatedAt, new Date(expectedUpdatedAt))))
       .returning();
     if (!updated) {
-      res.status(500).json({
-        error: { code: 'INTERNAL_ERROR', message: '역할을 수정하지 못했습니다.', requestId: req.requestId },
-      });
+      sendVersionConflict(res, req.requestId);
       return;
     }
 

@@ -10,6 +10,9 @@ import { createRequireAuth } from '../middleware/auth';
 import { createRequirePermission } from '../middleware/permissions';
 import { writeAuditLog } from '../services/audit';
 import { unsetOtherPrimaryGuardians } from '../utils/studentGuardians';
+import { sendVersionConflict } from '../utils/httpErrors';
+
+class OptimisticLockError extends Error {}
 
 const updateLinkSchema = z.object({
   relationship: z.string().optional(),
@@ -71,9 +74,16 @@ export function createStudentGuardiansRouter(deps: StudentGuardiansRouterDeps): 
           .set({ ...changes, updatedAt: new Date() })
           .where(and(eq(studentGuardians.id, id), eq(studentGuardians.updatedAt, new Date(expectedUpdatedAt))))
           .returning();
+        if (!row) {
+          throw new OptimisticLockError();
+        }
         return row;
       });
     } catch (error) {
+      if (error instanceof OptimisticLockError) {
+        sendVersionConflict(res, req.requestId);
+        return;
+      }
       if (isUniqueViolation(error, 'student_guardians_primary_unique')) {
         res.status(409).json({
           error: { code: 'VALIDATION_ERROR', message: '이미 다른 보호자가 대표로 지정되어 있습니다. 새로고침 후 다시 시도해 주세요.', requestId: req.requestId },
@@ -81,12 +91,6 @@ export function createStudentGuardiansRouter(deps: StudentGuardiansRouterDeps): 
         return;
       }
       throw error;
-    }
-    if (!updated) {
-      res.status(409).json({
-        error: { code: 'VERSION_CONFLICT', message: '다른 곳에서 이미 변경되었습니다. 새로고침 후 다시 시도해 주세요.', requestId: req.requestId },
-      });
-      return;
     }
 
     await writeAuditLog({

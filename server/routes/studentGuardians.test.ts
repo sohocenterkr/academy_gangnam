@@ -157,6 +157,48 @@ describe('student-guardians routes', () => {
     expect(currentLink.relationship).toBe(winner.body.data.relationship);
   });
 
+  it('does not commit a sibling isPrimary unset when the version check fails', async () => {
+    const { studentId, guardianId } = await seedFixtures();
+    const app = createApp({ emailAdapter: createFakeEmailAdapter() });
+    const cookie = await loginAs(app, SUPER_EMAIL);
+
+    const [guardianB] = await db.insert(guardians).values({ name: 'test-studentguardians-보호자B', phoneNormalized: '01077770000' }).returning();
+
+    const linkedA = await request(app).post(`/api/students/${studentId}/guardians`).set('Cookie', cookie).send({ guardianId });
+    const linkedB = await request(app)
+      .post(`/api/students/${studentId}/guardians`)
+      .set('Cookie', cookie)
+      .send({ guardianId: guardianB!.id });
+
+    // Make A the current primary guardian.
+    const setPrimaryA = await request(app)
+      .patch(`/api/student-guardians/${linkedA.body.data.id}`)
+      .set('Cookie', cookie)
+      .send({ isPrimary: true, expectedUpdatedAt: linkedA.body.data.updatedAt });
+    expect(setPrimaryA.status).toBe(200);
+    expect(setPrimaryA.body.data.isPrimary).toBe(true);
+
+    // Make B's captured updatedAt stale by performing an unrelated PATCH on B first.
+    const touchB = await request(app)
+      .patch(`/api/student-guardians/${linkedB.body.data.id}`)
+      .set('Cookie', cookie)
+      .send({ relationship: '모', expectedUpdatedAt: linkedB.body.data.updatedAt });
+    expect(touchB.status).toBe(200);
+
+    // Now attempt to make B primary using the now-stale expectedUpdatedAt captured before the touch above.
+    const stalePrimaryB = await request(app)
+      .patch(`/api/student-guardians/${linkedB.body.data.id}`)
+      .set('Cookie', cookie)
+      .send({ isPrimary: true, expectedUpdatedAt: linkedB.body.data.updatedAt });
+    expect(stalePrimaryB.status).toBe(409);
+    expect(stalePrimaryB.body.error.code).toBe('VERSION_CONFLICT');
+
+    // A must still be the primary guardian — the sibling unset from the failed transaction must not have committed.
+    const detail = await request(app).get(`/api/students/${studentId}`).set('Cookie', cookie);
+    const currentA = detail.body.data.guardians.find((g: { id: string }) => g.id === linkedA.body.data.id);
+    expect(currentA.isPrimary).toBe(true);
+  });
+
   it('unlinks a guardian from a student', async () => {
     const { studentId, guardianId } = await seedFixtures();
     const app = createApp({ emailAdapter: createFakeEmailAdapter() });

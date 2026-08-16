@@ -14,6 +14,7 @@ import { writeAuditLog } from '../services/audit';
 import { revokeAllSessionsForAdmin } from '../services/session';
 import { requestPasswordReset } from '../services/passwordReset';
 import type { EmailAdapter } from '../services/email';
+import { sendVersionConflict } from '../utils/httpErrors';
 
 const createAdminSchema = z.object({
   email: z.string().email(),
@@ -26,7 +27,7 @@ const updateAdminSchema = z.object({
   name: z.string().min(1).optional(),
   roleId: z.string().uuid().optional(),
   status: z.enum(['active', 'inactive', 'locked']).optional(),
-  expectedUpdatedAt: z.string(),
+  expectedUpdatedAt: z.iso.datetime(),
 });
 
 function toSafeAdmin(admin: typeof admins.$inferSelect) {
@@ -115,7 +116,15 @@ export function createAdminsRouter(deps: AdminsRouterDeps): Router {
     const passwordHash = await hashPassword(parsed.password);
     const [created] = await db
       .insert(admins)
-      .values({ email: normalizedEmail, name: parsed.name, passwordHash, roleId: parsed.roleId, status: 'active' })
+      .values({
+        email: normalizedEmail,
+        name: parsed.name,
+        passwordHash,
+        roleId: parsed.roleId,
+        status: 'active',
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      })
       .returning();
     if (!created) {
       res.status(500).json({
@@ -169,13 +178,6 @@ export function createAdminsRouter(deps: AdminsRouterDeps): Router {
       res.status(404).json({ error: { code: 'NOT_FOUND', message: '관리자를 찾을 수 없습니다.', requestId: req.requestId } });
       return;
     }
-    if (before.updatedAt.toISOString() !== parsed.expectedUpdatedAt) {
-      res.status(409).json({
-        error: { code: 'VERSION_CONFLICT', message: '다른 곳에서 이미 변경되었습니다. 새로고침 후 다시 시도해 주세요.', requestId: req.requestId },
-      });
-      return;
-    }
-
     if (parsed.roleId !== undefined) {
       const [targetRole] = await db.select().from(roles).where(eq(roles.id, parsed.roleId));
       if (
@@ -209,16 +211,14 @@ export function createAdminsRouter(deps: AdminsRouterDeps): Router {
       }
     }
 
-    const { expectedUpdatedAt: _expected, ...changes } = parsed;
+    const { expectedUpdatedAt, ...changes } = parsed;
     const [updated] = await db
       .update(admins)
       .set({ ...changes, updatedAt: new Date() })
-      .where(eq(admins.id, id))
+      .where(and(eq(admins.id, id), eq(admins.updatedAt, new Date(expectedUpdatedAt))))
       .returning();
     if (!updated) {
-      res.status(500).json({
-        error: { code: 'INTERNAL_ERROR', message: '관리자를 수정하지 못했습니다.', requestId: req.requestId },
-      });
+      sendVersionConflict(res, req.requestId);
       return;
     }
 
