@@ -447,8 +447,10 @@ export function createStudentsRouter(deps: StudentsRouterDeps): Router {
       return;
     }
 
-    await db.update(students).set({ deletedAt: new Date(), updatedBy: req.admin!.id, updatedAt: new Date() }).where(eq(students.id, id));
-    await db.update(studentCheckinPhones).set({ isActive: false, updatedAt: new Date() }).where(eq(studentCheckinPhones.studentId, id));
+    await db.transaction(async (tx) => {
+      await tx.update(students).set({ deletedAt: new Date(), updatedBy: req.admin!.id, updatedAt: new Date() }).where(eq(students.id, id));
+      await tx.update(studentCheckinPhones).set({ isActive: false, updatedAt: new Date() }).where(eq(studentCheckinPhones.studentId, id));
+    });
 
     await writeAuditLog({
       adminId: req.admin!.id,
@@ -478,12 +480,15 @@ export function createStudentsRouter(deps: StudentsRouterDeps): Router {
       return;
     }
 
-    const [restored] = await db
-      .update(students)
-      .set({ deletedAt: null, updatedBy: req.admin!.id, updatedAt: new Date() })
-      .where(eq(students.id, id))
-      .returning();
-    await db.update(studentCheckinPhones).set({ isActive: true, updatedAt: new Date() }).where(eq(studentCheckinPhones.studentId, id));
+    const restored = await db.transaction(async (tx) => {
+      const [row] = await tx
+        .update(students)
+        .set({ deletedAt: null, updatedBy: req.admin!.id, updatedAt: new Date() })
+        .where(eq(students.id, id))
+        .returning();
+      await tx.update(studentCheckinPhones).set({ isActive: true, updatedAt: new Date() }).where(eq(studentCheckinPhones.studentId, id));
+      return row;
+    });
 
     await writeAuditLog({
       adminId: req.admin!.id,
