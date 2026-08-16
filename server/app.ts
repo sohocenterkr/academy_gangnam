@@ -15,6 +15,8 @@ import { createCheckInRouter } from './routes/checkIn';
 import { createCheckInsRouter } from './routes/checkIns';
 import { createInstructorsRouter } from './routes/instructors';
 import { createCoursesRouter } from './routes/courses';
+import { createCourseSchedulesRouter } from './routes/courseSchedules';
+import { createCourseExceptionsRouter } from './routes/courseExceptions';
 import { loadEnv } from './env';
 import { createResendEmailAdapter } from './services/email';
 
@@ -58,6 +60,8 @@ export function createApp(overrides: AppOverrides = {}): Express {
   app.use('/api/check-ins', createCheckInsRouter({ sessionSecret: env.AUTH_SESSION_SECRET }));
   app.use('/api/instructors', createInstructorsRouter({ sessionSecret: env.AUTH_SESSION_SECRET }));
   app.use('/api/courses', createCoursesRouter({ sessionSecret: env.AUTH_SESSION_SECRET }));
+  app.use('/api', createCourseSchedulesRouter({ sessionSecret: env.AUTH_SESSION_SECRET }));
+  app.use('/api', createCourseExceptionsRouter({ sessionSecret: env.AUTH_SESSION_SECRET }));
   app.use('/api', healthRouter);
   app.use('/api', (req, res) => {
     res.status(404).json({
