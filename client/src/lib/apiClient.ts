@@ -4,7 +4,8 @@ export class ApiRequestError extends Error {
   constructor(
     message: string,
     public readonly code: string,
-    public readonly requestId: string
+    public readonly requestId: string,
+    public readonly data?: unknown
   ) {
     super(message);
     this.name = 'ApiRequestError';
@@ -64,7 +65,8 @@ export async function apiPost<T>(path: string, body: unknown): Promise<T> {
     if (!errorBody) {
       throwInvalidResponse();
     }
-    throw new ApiRequestError(errorBody.message, errorBody.code, errorBody.requestId ?? '');
+    const errorData = (parsed as { data?: unknown } | undefined)?.data;
+    throw new ApiRequestError(errorBody.message, errorBody.code, errorBody.requestId ?? '', errorData);
   }
 
   if (!('data' in parsed)) {
