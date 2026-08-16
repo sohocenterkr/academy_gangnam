@@ -401,6 +401,55 @@ describe('students routes — status, delete, restore', () => {
       .where(and(eq(studentCheckinPhones.studentId, studentId), eq(studentCheckinPhones.sourceType, 'student')));
     expect(afterRestorePhone!.isActive).toBe(true);
   });
+
+  it('restore does not reactivate a guardian check-in phone whose link has useForCheckin=false (finding #1)', async () => {
+    const { guardians } = await import('@shared/schema');
+    const { gradeLevelId } = await seedSuperAdminAndGrade();
+    const app = createApp({ emailAdapter: createFakeEmailAdapter() });
+    const cookie = await loginAs(app, SUPER_EMAIL);
+
+    const created = await request(app)
+      .post('/api/students')
+      .set('Cookie', cookie)
+      .send({ name: TEST_STUDENT_NAME, phone: TEST_STUDENT_PHONE, gradeLevelId });
+    const studentId = created.body.data.student.id;
+
+    const [guardian] = await db
+      .insert(guardians)
+      .values({ name: 'test-student-guardian-복원제외', phoneNormalized: '01066660000' })
+      .returning();
+
+    await request(app)
+      .post(`/api/students/${studentId}/guardians`)
+      .set('Cookie', cookie)
+      .send({ guardianId: guardian!.id, useForCheckin: false });
+
+    const [beforeDelete] = await db
+      .select()
+      .from(studentCheckinPhones)
+      .where(and(eq(studentCheckinPhones.studentId, studentId), eq(studentCheckinPhones.sourceType, 'guardian')));
+    expect(beforeDelete!.isActive).toBe(false);
+
+    await request(app).delete(`/api/students/${studentId}`).set('Cookie', cookie);
+    const restored = await request(app).post(`/api/students/${studentId}/restore`).set('Cookie', cookie);
+    expect(restored.status).toBe(200);
+
+    const [afterRestore] = await db
+      .select()
+      .from(studentCheckinPhones)
+      .where(and(eq(studentCheckinPhones.studentId, studentId), eq(studentCheckinPhones.sourceType, 'guardian')));
+    expect(afterRestore!.isActive).toBe(false);
+
+    // Also verify the student's own phone row IS reactivated unconditionally.
+    const [afterRestoreOwnPhone] = await db
+      .select()
+      .from(studentCheckinPhones)
+      .where(and(eq(studentCheckinPhones.studentId, studentId), eq(studentCheckinPhones.sourceType, 'student')));
+    expect(afterRestoreOwnPhone!.isActive).toBe(true);
+
+    await db.delete(studentGuardians).where(eq(studentGuardians.guardianId, guardian!.id));
+    await db.delete(guardians).where(eq(guardians.id, guardian!.id));
+  });
 });
 
 describe('students routes — guardian linking', () => {

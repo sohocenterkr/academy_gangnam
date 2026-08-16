@@ -13,6 +13,7 @@ import { createRequirePermission } from '../middleware/permissions';
 import { writeAuditLog } from '../services/audit';
 import { unsetOtherPrimaryGuardians } from '../utils/studentGuardians';
 import { syncStudentOwnPhone, upsertGuardianLinkPhone } from '../utils/checkinPhones';
+import { isUniqueViolation } from '../utils/httpErrors';
 
 const STATUS_VALUES = ['enrolled', 'paused', 'withdrawn', 'graduated'] as const;
 
@@ -81,21 +82,6 @@ function isForeignKeyViolation(error: unknown): boolean {
     if (current instanceof Error) {
       const code = (current as { code?: unknown }).code;
       if (code === '23503') return true;
-      current = current.cause;
-      continue;
-    }
-    break;
-  }
-  return false;
-}
-
-function isUniqueViolation(error: unknown, indexName: string): boolean {
-  let current: unknown = error;
-  while (current) {
-    if (current instanceof Error) {
-      if (current.message.includes(indexName)) return true;
-      const constraint = (current as { constraint?: unknown }).constraint;
-      if (typeof constraint === 'string' && constraint.includes(indexName)) return true;
       current = current.cause;
       continue;
     }
@@ -486,7 +472,31 @@ export function createStudentsRouter(deps: StudentsRouterDeps): Router {
         .set({ deletedAt: null, updatedBy: req.admin!.id, updatedAt: new Date() })
         .where(eq(students.id, id))
         .returning();
-      await tx.update(studentCheckinPhones).set({ isActive: true, updatedAt: new Date() }).where(eq(studentCheckinPhones.studentId, id));
+
+      // Reactivate the student's own check-in phone unconditionally — a student's own phone
+      // is always check-in-eligible.
+      await tx
+        .update(studentCheckinPhones)
+        .set({ isActive: true, updatedAt: new Date() })
+        .where(and(eq(studentCheckinPhones.studentId, id), eq(studentCheckinPhones.sourceType, 'student')));
+
+      // Recompute guardian check-in phones from the CURRENT student_guardians.use_for_checkin
+      // values, rather than blindly reactivating every row — a guardian explicitly excluded
+      // from kiosk search (use_for_checkin=false) must stay excluded after a delete/restore
+      // cycle, not silently become valid again.
+      const links = await tx
+        .select({
+          guardianId: studentGuardians.guardianId,
+          useForCheckin: studentGuardians.useForCheckin,
+          phoneNormalized: guardians.phoneNormalized,
+        })
+        .from(studentGuardians)
+        .innerJoin(guardians, eq(studentGuardians.guardianId, guardians.id))
+        .where(eq(studentGuardians.studentId, id));
+      for (const link of links) {
+        await upsertGuardianLinkPhone(tx, id, link.guardianId, link.phoneNormalized, link.useForCheckin);
+      }
+
       return row;
     });
 

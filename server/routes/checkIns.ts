@@ -1,16 +1,17 @@
-import { and, desc, eq } from 'drizzle-orm';
+import { and, desc, eq, gte, lte } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
 import { Router } from 'express';
 import { z } from 'zod';
 import { getNowKSTISOString, getTodayKST } from '@shared/kst';
 import { PERMISSIONS } from '@shared/permissions';
+import { maskName } from '@shared/masking';
 import { db } from '../db';
 import { checkIns, checkInChangeLogs, students } from '@shared/schema';
 import { parseBody } from '../utils/validate';
 import { createRequireAuth } from '../middleware/auth';
 import { createRequirePermission } from '../middleware/permissions';
 import { writeAuditLog } from '../services/audit';
-import { sendVersionConflict } from '../utils/httpErrors';
+import { sendVersionConflict, isUniqueViolation } from '../utils/httpErrors';
 
 const listQuerySchema = z.object({
   studentId: z.string().optional(),
@@ -34,21 +35,6 @@ const cancelSchema = z.object({
   reason: z.string().min(1),
 });
 
-function isUniqueViolation(error: unknown, indexName: string): boolean {
-  let current: unknown = error;
-  while (current) {
-    if (current instanceof Error) {
-      if (current.message.includes(indexName)) return true;
-      const constraint = (current as { constraint?: unknown }).constraint;
-      if (typeof constraint === 'string' && constraint.includes(indexName)) return true;
-      current = current.cause;
-      continue;
-    }
-    break;
-  }
-  return false;
-}
-
 export interface CheckInsRouterDeps {
   sessionSecret: string;
 }
@@ -64,14 +50,32 @@ export function createCheckInsRouter(deps: CheckInsRouterDeps): Router {
 
     const conditions = [];
     if (query.studentId) conditions.push(eq(checkIns.studentId, query.studentId));
+    if (query.from) conditions.push(gte(checkIns.checkInDate, query.from));
+    if (query.to) conditions.push(lte(checkIns.checkInDate, query.to));
 
     const rows = await db
-      .select()
+      .select({
+        id: checkIns.id,
+        studentId: checkIns.studentId,
+        studentName: students.name,
+        checkInDate: checkIns.checkInDate,
+        checkInAt: checkIns.checkInAt,
+        source: checkIns.source,
+        status: checkIns.status,
+        exceptionReason: checkIns.exceptionReason,
+        isException: checkIns.isException,
+        updatedAt: checkIns.updatedAt,
+        createdAt: checkIns.createdAt,
+      })
       .from(checkIns)
+      .innerJoin(students, eq(checkIns.studentId, students.id))
       .where(conditions.length > 0 ? and(...conditions) : undefined)
       .orderBy(desc(checkIns.checkInAt));
 
-    res.json({ data: rows, meta: { requestId: req.requestId, kstTimestamp: getNowKSTISOString() } });
+    res.json({
+      data: rows.map((row) => ({ ...row, studentName: maskName(row.studentName) })),
+      meta: { requestId: req.requestId, kstTimestamp: getNowKSTISOString() },
+    });
   });
 
   router.post('/manual', requireAuth, requireCheckinsManage, async (req, res) => {
@@ -90,22 +94,37 @@ export function createCheckInsRouter(deps: CheckInsRouterDeps): Router {
 
     let created;
     try {
-      [created] = await db
-        .insert(checkIns)
-        .values({
-          studentId: parsed.studentId,
-          checkInDate,
-          checkInAt,
-          source: 'admin',
-          status: 'active',
-          idempotencyKey: randomUUID(),
-          exceptionReason: parsed.reason,
-          isException,
-          createdBy: req.admin!.id,
-          createdAt: checkInAt,
-          updatedAt: checkInAt,
-        })
-        .returning();
+      created = await db.transaction(async (tx) => {
+        const [row] = await tx
+          .insert(checkIns)
+          .values({
+            studentId: parsed.studentId,
+            checkInDate,
+            checkInAt,
+            source: 'admin',
+            status: 'active',
+            idempotencyKey: randomUUID(),
+            exceptionReason: isException ? parsed.reason : null,
+            isException,
+            createdBy: req.admin!.id,
+            createdAt: checkInAt,
+            updatedAt: checkInAt,
+          })
+          .returning();
+        if (!row) return undefined;
+
+        await tx.insert(checkInChangeLogs).values({
+          checkInId: row.id,
+          action: isException ? 'exception_create' : 'create',
+          beforeData: null,
+          afterData: { checkInAt: row.checkInAt, source: 'admin', reason: parsed.reason, isException },
+          reason: parsed.reason,
+          adminId: req.admin!.id,
+          createdAt: new Date(),
+        });
+
+        return row;
+      });
     } catch (error) {
       if (isUniqueViolation(error, 'check_ins_student_date_active_unique')) {
         res.status(409).json({
@@ -125,16 +144,6 @@ export function createCheckInsRouter(deps: CheckInsRouterDeps): Router {
       res.status(500).json({ error: { code: 'INTERNAL_ERROR', message: '등원 등록에 실패했습니다.', requestId: req.requestId } });
       return;
     }
-
-    await db.insert(checkInChangeLogs).values({
-      checkInId: created.id,
-      action: isException ? 'exception_create' : 'create',
-      beforeData: null,
-      afterData: { checkInAt: created.checkInAt, source: 'admin', reason: parsed.reason, isException },
-      reason: parsed.reason,
-      adminId: req.admin!.id,
-      createdAt: new Date(),
-    });
 
     await writeAuditLog({
       adminId: req.admin!.id,
@@ -166,27 +175,55 @@ export function createCheckInsRouter(deps: CheckInsRouterDeps): Router {
       res.status(404).json({ error: { code: 'NOT_FOUND', message: '등원 기록을 찾을 수 없습니다.', requestId: req.requestId } });
       return;
     }
+    if (before.status === 'canceled') {
+      res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: '이미 취소된 등원 기록입니다.', requestId: req.requestId } });
+      return;
+    }
 
     const { expectedUpdatedAt, reason, checkInAt } = parsed;
-    const [updated] = await db
-      .update(checkIns)
-      .set({ ...(checkInAt ? { checkInAt: new Date(checkInAt) } : {}), updatedAt: new Date() })
-      .where(and(eq(checkIns.id, id), eq(checkIns.updatedAt, new Date(expectedUpdatedAt))))
-      .returning();
+
+    let updated;
+    try {
+      updated = await db.transaction(async (tx) => {
+        const [row] = await tx
+          .update(checkIns)
+          .set({
+            ...(checkInAt ? { checkInAt: new Date(checkInAt), checkInDate: getTodayKST(new Date(checkInAt)) } : {}),
+            updatedAt: new Date(),
+          })
+          .where(and(eq(checkIns.id, id), eq(checkIns.updatedAt, new Date(expectedUpdatedAt))))
+          .returning();
+        if (!row) return undefined;
+
+        await tx.insert(checkInChangeLogs).values({
+          checkInId: row.id,
+          action: 'update',
+          beforeData: { checkInAt: before.checkInAt },
+          afterData: { checkInAt: row.checkInAt },
+          reason,
+          adminId: req.admin!.id,
+          createdAt: new Date(),
+        });
+
+        return row;
+      });
+    } catch (error) {
+      if (isUniqueViolation(error, 'check_ins_student_date_active_unique')) {
+        res.status(409).json({
+          error: {
+            code: 'DUPLICATE_CHECKIN',
+            message: '변경된 시간에 이미 다른 등원 기록이 있습니다.',
+            requestId: req.requestId,
+          },
+        });
+        return;
+      }
+      throw error;
+    }
     if (!updated) {
       sendVersionConflict(res, req.requestId);
       return;
     }
-
-    await db.insert(checkInChangeLogs).values({
-      checkInId: updated.id,
-      action: 'update',
-      beforeData: { checkInAt: before.checkInAt },
-      afterData: { checkInAt: updated.checkInAt },
-      reason,
-      adminId: req.admin!.id,
-      createdAt: new Date(),
-    });
 
     await writeAuditLog({
       adminId: req.admin!.id,
@@ -223,25 +260,32 @@ export function createCheckInsRouter(deps: CheckInsRouterDeps): Router {
       return;
     }
 
-    const [updated] = await db
-      .update(checkIns)
-      .set({ status: 'canceled', updatedAt: new Date() })
-      .where(eq(checkIns.id, id))
-      .returning();
+    const updated = await db.transaction(async (tx) => {
+      // The status='active' condition (not just id) is the actual correctness guarantee against
+      // a concurrent double-cancel — the pre-check above is only a fast-path optimization.
+      const [row] = await tx
+        .update(checkIns)
+        .set({ status: 'canceled', updatedAt: new Date() })
+        .where(and(eq(checkIns.id, id), eq(checkIns.status, 'active')))
+        .returning();
+      if (!row) return undefined;
+
+      await tx.insert(checkInChangeLogs).values({
+        checkInId: row.id,
+        action: 'cancel',
+        beforeData: { status: before.status },
+        afterData: { status: 'canceled' },
+        reason: parsed.reason,
+        adminId: req.admin!.id,
+        createdAt: new Date(),
+      });
+
+      return row;
+    });
     if (!updated) {
-      res.status(500).json({ error: { code: 'INTERNAL_ERROR', message: '취소에 실패했습니다.', requestId: req.requestId } });
+      res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: '이미 취소된 등원 기록입니다.', requestId: req.requestId } });
       return;
     }
-
-    await db.insert(checkInChangeLogs).values({
-      checkInId: updated.id,
-      action: 'cancel',
-      beforeData: { status: before.status },
-      afterData: { status: 'canceled' },
-      reason: parsed.reason,
-      adminId: req.admin!.id,
-      createdAt: new Date(),
-    });
 
     await writeAuditLog({
       adminId: req.admin!.id,

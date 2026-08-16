@@ -10,7 +10,7 @@ import { createRequireAuth } from '../middleware/auth';
 import { createRequirePermission } from '../middleware/permissions';
 import { writeAuditLog } from '../services/audit';
 import { unsetOtherPrimaryGuardians } from '../utils/studentGuardians';
-import { sendVersionConflict } from '../utils/httpErrors';
+import { sendVersionConflict, isUniqueViolation } from '../utils/httpErrors';
 import { upsertGuardianLinkPhone, removeGuardianLinkPhone } from '../utils/checkinPhones';
 
 class OptimisticLockError extends Error {}
@@ -22,21 +22,6 @@ const updateLinkSchema = z.object({
   useForCheckin: z.boolean().optional(),
   expectedUpdatedAt: z.iso.datetime(),
 });
-
-function isUniqueViolation(error: unknown, indexName: string): boolean {
-  let current: unknown = error;
-  while (current) {
-    if (current instanceof Error) {
-      if (current.message.includes(indexName)) return true;
-      const constraint = (current as { constraint?: unknown }).constraint;
-      if (typeof constraint === 'string' && constraint.includes(indexName)) return true;
-      current = current.cause;
-      continue;
-    }
-    break;
-  }
-  return false;
-}
 
 export interface StudentGuardiansRouterDeps {
   sessionSecret: string;

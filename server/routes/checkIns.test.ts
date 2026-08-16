@@ -1,4 +1,5 @@
 import { eq } from 'drizzle-orm';
+import { randomUUID } from 'node:crypto';
 import { afterEach, describe, expect, it } from 'vitest';
 import request from 'supertest';
 import { db } from '../db';
@@ -95,7 +96,10 @@ describe('admin check-ins routes', () => {
       .send({ studentId, reason: '기기 오류로 수동 등록' });
     expect(created.status).toBe(200);
     expect(created.body.data.source).toBe('admin');
-    expect(created.body.data.exceptionReason).toBe('기기 오류로 수동 등록');
+    // Finding #8: a non-exception manual create must not store the reason in exception_reason
+    // (the column is meant only for actual exceptions) — the reason is preserved either way in
+    // check_in_change_logs.reason.
+    expect(created.body.data.exceptionReason).toBeNull();
 
     const list = await request(app).get(`/api/check-ins?studentId=${studentId}`).set('Cookie', cookie);
     expect(list.status).toBe(200);
@@ -180,5 +184,137 @@ describe('admin check-ins routes', () => {
 
     expect(staleEdit.status).toBe(409);
     expect(staleEdit.body.error.code).toBe('VERSION_CONFLICT');
+  });
+
+  it('includes a masked studentName on each list row (finding #6)', async () => {
+    const { studentId } = await seedFixtures();
+    const app = createApp({ emailAdapter: createFakeEmailAdapter() });
+    const cookie = await loginAs(app, SUPER_EMAIL);
+
+    await request(app).post('/api/check-ins/manual').set('Cookie', cookie).send({ studentId, reason: '등록' });
+
+    const list = await request(app).get(`/api/check-ins?studentId=${studentId}`).set('Cookie', cookie);
+    expect(list.status).toBe(200);
+    expect(list.body.data).toHaveLength(1);
+    expect(list.body.data[0].studentName).toBe('t**************생');
+    expect(list.body.data[0].studentName).not.toBe(TEST_STUDENT_NAME);
+  });
+
+  it('filters the list by from/to check-in date (finding #13)', async () => {
+    const { studentId } = await seedFixtures();
+    const app = createApp({ emailAdapter: createFakeEmailAdapter() });
+    const cookie = await loginAs(app, SUPER_EMAIL);
+
+    await request(app).post('/api/check-ins/manual').set('Cookie', cookie).send({ studentId, reason: '등록' });
+
+    const withinRange = await request(app)
+      .get(`/api/check-ins?studentId=${studentId}&from=2000-01-01&to=2999-12-31`)
+      .set('Cookie', cookie);
+    expect(withinRange.body.data).toHaveLength(1);
+
+    const outsideRange = await request(app)
+      .get(`/api/check-ins?studentId=${studentId}&from=2000-01-01&to=2000-01-02`)
+      .set('Cookie', cookie);
+    expect(outsideRange.body.data).toHaveLength(0);
+  });
+
+  it('rejects concurrent double-cancel — only one of two simultaneous cancels succeeds (finding #10)', async () => {
+    const { studentId } = await seedFixtures();
+    const app = createApp({ emailAdapter: createFakeEmailAdapter() });
+    const cookie = await loginAs(app, SUPER_EMAIL);
+
+    const created = await request(app).post('/api/check-ins/manual').set('Cookie', cookie).send({ studentId, reason: '등록' });
+
+    await Promise.all([request(app).get('/api/check-ins').set('Cookie', cookie), request(app).get('/api/check-ins').set('Cookie', cookie)]);
+
+    const [first, second] = await Promise.all([
+      request(app).post(`/api/check-ins/${created.body.data.id}/cancel`).set('Cookie', cookie).send({ reason: '취소 A' }),
+      request(app).post(`/api/check-ins/${created.body.data.id}/cancel`).set('Cookie', cookie).send({ reason: '취소 B' }),
+    ]);
+
+    const statuses = [first.status, second.status].sort();
+    expect(statuses).toEqual([200, 400]);
+
+    const changeLogs = await db.select().from(checkInChangeLogs).where(eq(checkInChangeLogs.checkInId, created.body.data.id));
+    expect(changeLogs.filter((log) => log.action === 'cancel')).toHaveLength(1);
+  });
+
+  it('rejects editing an already-canceled check-in with VALIDATION_ERROR (finding #3)', async () => {
+    const { studentId } = await seedFixtures();
+    const app = createApp({ emailAdapter: createFakeEmailAdapter() });
+    const cookie = await loginAs(app, SUPER_EMAIL);
+
+    const created = await request(app).post('/api/check-ins/manual').set('Cookie', cookie).send({ studentId, reason: '등록' });
+    await request(app).post(`/api/check-ins/${created.body.data.id}/cancel`).set('Cookie', cookie).send({ reason: '취소' });
+
+    const edit = await request(app)
+      .patch(`/api/check-ins/${created.body.data.id}`)
+      .set('Cookie', cookie)
+      .send({ reason: '취소된 걸 수정 시도', expectedUpdatedAt: created.body.data.updatedAt });
+
+    expect(edit.status).toBe(400);
+    expect(edit.body.error.code).toBe('VALIDATION_ERROR');
+  });
+
+  it('recomputes checkInDate when a PATCH moves checkInAt across a KST midnight (finding #3)', async () => {
+    const { studentId } = await seedFixtures();
+    const app = createApp({ emailAdapter: createFakeEmailAdapter() });
+    const cookie = await loginAs(app, SUPER_EMAIL);
+
+    const created = await request(app).post('/api/check-ins/manual').set('Cookie', cookie).send({ studentId, reason: '등록' });
+
+    // 2026-08-16T15:30:00Z is 2026-08-17T00:30:00+09:00 in KST — moves the business date forward a day.
+    const edited = await request(app)
+      .patch(`/api/check-ins/${created.body.data.id}`)
+      .set('Cookie', cookie)
+      .send({ checkInAt: '2026-08-16T15:30:00.000Z', reason: '자정 이동', expectedUpdatedAt: created.body.data.updatedAt });
+
+    expect(edited.status).toBe(200);
+    expect(edited.body.data.checkInDate).toBe('2026-08-17');
+
+    const rows = await db.select().from(checkIns).where(eq(checkIns.id, created.body.data.id));
+    expect(rows[0]!.checkInDate).toBe('2026-08-17');
+  });
+
+  it('returns 409 DUPLICATE_CHECKIN when a PATCH moves checkInAt onto a date with another active check-in (finding #3)', async () => {
+    const { studentId } = await seedFixtures();
+    const app = createApp({ emailAdapter: createFakeEmailAdapter() });
+    const cookie = await loginAs(app, SUPER_EMAIL);
+
+    // The duplicate-prevention unique index only covers non-exception active rows, and the
+    // manual-create API always stamps "today" as checkInDate, so to get two non-exception active
+    // rows on two DIFFERENT dates for the same student (the setup needed to prove the PATCH-time
+    // collision) this seeds the second row directly rather than going through two real days.
+    const other = new Date('2026-08-10T01:00:00.000Z');
+    const [otherRow] = await db
+      .insert(checkIns)
+      .values({
+        studentId,
+        checkInDate: '2026-08-10',
+        checkInAt: other,
+        source: 'admin',
+        status: 'active',
+        idempotencyKey: randomUUID(),
+        isException: false,
+        createdBy: null,
+        createdAt: other,
+        updatedAt: other,
+      })
+      .returning();
+
+    const created = await request(app).post('/api/check-ins/manual').set('Cookie', cookie).send({ studentId, reason: '등록' });
+
+    // Move `created`'s checkInAt onto otherRow's KST date — collides with otherRow's active,
+    // non-exception row on (studentId, checkInDate).
+    const collide = await request(app)
+      .patch(`/api/check-ins/${created.body.data.id}`)
+      .set('Cookie', cookie)
+      .send({ checkInAt: '2026-08-10T01:00:00.000Z', reason: '충돌 시도', expectedUpdatedAt: created.body.data.updatedAt });
+
+    expect(collide.status).toBe(409);
+    expect(collide.body.error.code).toBe('DUPLICATE_CHECKIN');
+
+    await db.delete(checkInChangeLogs).where(eq(checkInChangeLogs.checkInId, otherRow!.id));
+    await db.delete(checkIns).where(eq(checkIns.id, otherRow!.id));
   });
 });

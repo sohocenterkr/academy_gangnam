@@ -139,6 +139,10 @@ describe('public check-in routes', () => {
 
     expect(secondConfirm.status).toBe(409);
     expect(secondConfirm.body.error.code).toBe('DUPLICATE_CHECKIN');
+    // Finding #2: the duplicate message must be built with the shared KST time formatter
+    // (Asia/Seoul), not the process-local toLocaleTimeString, so it always reads as a
+    // Korean-locale HH:MM string regardless of the server's local timezone.
+    expect(secondConfirm.body.error.message).toMatch(/이미 (오전|오후) \d{2}:\d{2}에 등원했습니다\./);
   });
 
   it('rejects an expired or invalid selection token', async () => {
@@ -152,5 +156,35 @@ describe('public check-in routes', () => {
     const app = createApp({ emailAdapter: createFakeEmailAdapter() });
     const response = await request(app).post('/api/check-in/search').send({ last4: 'abcd' });
     expect(response.status).toBe(400);
+  });
+
+  it('excludes a soft-deleted student from search results even if status is still enrolled (finding #9)', async () => {
+    const { studentId } = await seedStudent();
+    await db.update(students).set({ deletedAt: new Date() }).where(eq(students.id, studentId));
+    const app = createApp({ emailAdapter: createFakeEmailAdapter() });
+
+    const response = await request(app).post('/api/check-in/search').send({ last4: TEST_STUDENT_LAST4 });
+    expect(response.status).toBe(200);
+    expect(response.body.data.status).toBe('no_match');
+  });
+
+  it('does not report "confirmed" for an idempotency-key retry against a since-canceled check-in (finding #11)', async () => {
+    const { studentId } = await seedStudent();
+    const app = createApp({ emailAdapter: createFakeEmailAdapter() });
+
+    const search = await request(app).post('/api/check-in/search').send({ last4: TEST_STUDENT_LAST4 });
+    const selectionToken = search.body.data.candidates[0].selectionToken;
+
+    const first = await request(app).post('/api/check-in/confirm').send({ selectionToken });
+    expect(first.status).toBe(200);
+
+    // Simulate an admin canceling the check-in within the selection token's TTL.
+    await db.update(checkIns).set({ status: 'canceled' }).where(eq(checkIns.studentId, studentId));
+
+    // Retrying the exact same selection token hits the idempotency-key unique-violation branch;
+    // it must not report "confirmed" for a row that is no longer active.
+    const retry = await request(app).post('/api/check-in/confirm').send({ selectionToken });
+    expect(retry.status).toBe(410);
+    expect(retry.body.error.code).toBe('SELECTION_EXPIRED');
   });
 });
