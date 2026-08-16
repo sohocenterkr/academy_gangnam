@@ -785,7 +785,7 @@ git commit -m "feat: sync student_checkin_phones on every student/guardian/link 
 
 **Interfaces:**
 - Consumes: `studentCheckinPhones`, `students`, `checkIns` tables; `maskName` from `@shared/masking`; `createSelectionToken`/`verifySelectionToken` from `../utils/checkinToken`; `createRateLimiter` from `../middleware/rateLimit`; `getTodayKST`/`getNowKSTISOString` from `@shared/kst` (Task 1).
-- Produces: `createCheckInRouter(deps: { sessionSecret: string }): Router`, mounted at `/api/check-in` (singular — matches spec's exact URL), with `POST /search` and `POST /confirm`. No auth middleware on either route. Response shape for search: `{ status: 'no_match' } | { status: 'candidates'; candidates: Array<{ selectionToken: string; maskedName: string }> }`. Response shape for confirm: `{ status: 'confirmed'; checkInAt: string; maskedName: string } | { status: 'already_checked_in'; checkInAt: string }`.
+- Produces: `createCheckInRouter(deps: { sessionSecret: string }): Router`, mounted at `/api/check-in` (singular — matches spec's exact URL), with `POST /search` and `POST /confirm`. No auth middleware on either route. Response shape for search: `{ status: 'no_match' } | { status: 'candidates'; candidates: Array<{ selectionToken: string; maskedName: string }> }`. Confirm succeeds with `{ status: 'confirmed'; checkInAt: string; maskedName: string }` (200); a same-day duplicate is a `409 DUPLICATE_CHECKIN` error response, not a 200 `already_checked_in` status — the actual implementation in Step 3 below is the authority (this line was corrected post-implementation; an earlier draft of this line described a 200 `already_checked_in` shape that Step 3's code never implements).
 
 - [ ] **Step 1: Write the failing test `server/routes/checkIn.test.ts`**
 
