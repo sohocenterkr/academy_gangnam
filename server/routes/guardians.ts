@@ -28,7 +28,7 @@ const updateGuardianSchema = z.object({
   phone: z.string().min(1).optional(),
   notes: z.string().optional(),
   confirmDuplicate: z.boolean().optional(),
-  expectedUpdatedAt: z.string(),
+  expectedUpdatedAt: z.iso.datetime(),
 });
 
 function toMaskedGuardian(guardian: typeof guardians.$inferSelect) {
@@ -119,6 +119,8 @@ export function createGuardiansRouter(deps: GuardiansRouterDeps): Router {
         notes: parsed.notes,
         createdBy: req.admin!.id,
         updatedBy: req.admin!.id,
+        createdAt: new Date(),
+        updatedAt: new Date(),
       })
       .returning();
     if (!created) {
@@ -175,12 +177,6 @@ export function createGuardiansRouter(deps: GuardiansRouterDeps): Router {
       res.status(404).json({ error: { code: 'NOT_FOUND', message: '보호자를 찾을 수 없습니다.', requestId: req.requestId } });
       return;
     }
-    if (before.updatedAt.toISOString() !== parsed.expectedUpdatedAt) {
-      res.status(409).json({
-        error: { code: 'VERSION_CONFLICT', message: '다른 곳에서 이미 변경되었습니다. 새로고침 후 다시 시도해 주세요.', requestId: req.requestId },
-      });
-      return;
-    }
 
     let phoneNormalized: string | undefined;
     if (parsed.phone !== undefined) {
@@ -216,7 +212,7 @@ export function createGuardiansRouter(deps: GuardiansRouterDeps): Router {
       }
     }
 
-    const { expectedUpdatedAt: _expected, phone: _phone, confirmDuplicate: _confirm, ...rest } = parsed;
+    const { expectedUpdatedAt, phone: _phone, confirmDuplicate: _confirm, ...rest } = parsed;
     const [updated] = await db
       .update(guardians)
       .set({
@@ -225,10 +221,12 @@ export function createGuardiansRouter(deps: GuardiansRouterDeps): Router {
         updatedBy: req.admin!.id,
         updatedAt: new Date(),
       })
-      .where(eq(guardians.id, id))
+      .where(and(eq(guardians.id, id), eq(guardians.updatedAt, new Date(expectedUpdatedAt))))
       .returning();
     if (!updated) {
-      res.status(500).json({ error: { code: 'INTERNAL_ERROR', message: '보호자를 수정하지 못했습니다.', requestId: req.requestId } });
+      res.status(409).json({
+        error: { code: 'VERSION_CONFLICT', message: '다른 곳에서 이미 변경되었습니다. 새로고침 후 다시 시도해 주세요.', requestId: req.requestId },
+      });
       return;
     }
 

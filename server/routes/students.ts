@@ -44,7 +44,7 @@ const updateStudentSchema = z.object({
   specialNotes: z.string().optional(),
   counselingNotes: z.string().optional(),
   confirmDuplicate: z.boolean().optional(),
-  expectedUpdatedAt: z.string(),
+  expectedUpdatedAt: z.iso.datetime(),
 });
 
 const statusChangeSchema = z.object({
@@ -198,6 +198,8 @@ export function createStudentsRouter(deps: StudentsRouterDeps): Router {
           counselingNotes: parsed.counselingNotes,
           createdBy: req.admin!.id,
           updatedBy: req.admin!.id,
+          createdAt: new Date(),
+          updatedAt: new Date(),
         })
         .returning();
     } catch (error) {
@@ -285,12 +287,6 @@ export function createStudentsRouter(deps: StudentsRouterDeps): Router {
       res.status(404).json({ error: { code: 'NOT_FOUND', message: '학생을 찾을 수 없습니다.', requestId: req.requestId } });
       return;
     }
-    if (before.updatedAt.toISOString() !== parsed.expectedUpdatedAt) {
-      res.status(409).json({
-        error: { code: 'VERSION_CONFLICT', message: '다른 곳에서 이미 변경되었습니다. 새로고침 후 다시 시도해 주세요.', requestId: req.requestId },
-      });
-      return;
-    }
 
     let phoneNormalized: string | undefined;
     if (parsed.phone !== undefined) {
@@ -326,7 +322,7 @@ export function createStudentsRouter(deps: StudentsRouterDeps): Router {
       }
     }
 
-    const { expectedUpdatedAt: _expected, phone: _phone, confirmDuplicate: _confirm, ...rest } = parsed;
+    const { expectedUpdatedAt, phone: _phone, confirmDuplicate: _confirm, ...rest } = parsed;
 
     let updated;
     try {
@@ -338,7 +334,7 @@ export function createStudentsRouter(deps: StudentsRouterDeps): Router {
           updatedBy: req.admin!.id,
           updatedAt: new Date(),
         })
-        .where(eq(students.id, id))
+        .where(and(eq(students.id, id), eq(students.updatedAt, new Date(expectedUpdatedAt))))
         .returning();
     } catch (error) {
       if (isForeignKeyViolation(error)) {
@@ -355,7 +351,9 @@ export function createStudentsRouter(deps: StudentsRouterDeps): Router {
       throw error;
     }
     if (!updated) {
-      res.status(500).json({ error: { code: 'INTERNAL_ERROR', message: '학생을 수정하지 못했습니다.', requestId: req.requestId } });
+      res.status(409).json({
+        error: { code: 'VERSION_CONFLICT', message: '다른 곳에서 이미 변경되었습니다. 새로고침 후 다시 시도해 주세요.', requestId: req.requestId },
+      });
       return;
     }
 
@@ -523,6 +521,7 @@ export function createStudentsRouter(deps: StudentsRouterDeps): Router {
             isPrimary: parsed.isPrimary ?? false,
             receiveMessages: parsed.receiveMessages ?? true,
             useForCheckin: parsed.useForCheckin ?? true,
+            updatedAt: new Date(),
           })
           .returning();
         return row;

@@ -214,4 +214,28 @@ describe('guardians routes — detail and update', () => {
     expect(attempt.status).toBe(200);
     expect(attempt.body.data.status).toBe('duplicate_warning');
   });
+
+  it('rejects concurrent updates atomically — only one of two simultaneous PATCHes succeeds', async () => {
+    await seedSuperAdmin();
+    const app = createApp({ emailAdapter: createFakeEmailAdapter() });
+    const cookie = await loginAs(app, SUPER_EMAIL);
+
+    const created = await request(app).post('/api/guardians').set('Cookie', cookie).send({ name: TEST_GUARDIAN_NAME, phone: TEST_GUARDIAN_PHONE });
+    const expectedUpdatedAt = created.body.data.guardian.updatedAt;
+    const guardianId = created.body.data.guardian.id;
+
+    // Warm up the DB connection pool with a concurrent pair first — a cold pool
+    // opens a brand-new connection for the second of two simultaneous queries,
+    // which takes long enough (network + TLS setup) that the two PATCHes below
+    // would otherwise run sequentially instead of actually racing.
+    await Promise.all([request(app).get('/api/guardians').set('Cookie', cookie), request(app).get('/api/guardians').set('Cookie', cookie)]);
+
+    const [first, second] = await Promise.all([
+      request(app).patch(`/api/guardians/${guardianId}`).set('Cookie', cookie).send({ notes: '메모 A', expectedUpdatedAt }),
+      request(app).patch(`/api/guardians/${guardianId}`).set('Cookie', cookie).send({ notes: '메모 B', expectedUpdatedAt }),
+    ]);
+
+    const statuses = [first.status, second.status].sort();
+    expect(statuses).toEqual([200, 409]);
+  });
 });

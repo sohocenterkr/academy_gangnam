@@ -248,6 +248,33 @@ describe('students routes — detail and update', () => {
     expect(attempt.status).toBe(200);
     expect(attempt.body.data.status).toBe('duplicate_warning');
   });
+
+  it('rejects concurrent updates atomically — only one of two simultaneous PATCHes succeeds', async () => {
+    const { gradeLevelId } = await seedSuperAdminAndGrade();
+    const app = createApp({ emailAdapter: createFakeEmailAdapter() });
+    const cookie = await loginAs(app, SUPER_EMAIL);
+
+    const created = await request(app)
+      .post('/api/students')
+      .set('Cookie', cookie)
+      .send({ name: TEST_STUDENT_NAME, phone: TEST_STUDENT_PHONE, gradeLevelId });
+    const expectedUpdatedAt = created.body.data.student.updatedAt;
+    const studentId = created.body.data.student.id;
+
+    // Warm up the DB connection pool with a concurrent pair first — a cold pool
+    // opens a brand-new connection for the second of two simultaneous queries,
+    // which takes long enough (network + TLS setup) that the two PATCHes below
+    // would otherwise run sequentially instead of actually racing.
+    await Promise.all([request(app).get('/api/students').set('Cookie', cookie), request(app).get('/api/students').set('Cookie', cookie)]);
+
+    const [first, second] = await Promise.all([
+      request(app).patch(`/api/students/${studentId}`).set('Cookie', cookie).send({ specialNotes: '메모 A', expectedUpdatedAt }),
+      request(app).patch(`/api/students/${studentId}`).set('Cookie', cookie).send({ specialNotes: '메모 B', expectedUpdatedAt }),
+    ]);
+
+    const statuses = [first.status, second.status].sort();
+    expect(statuses).toEqual([200, 409]);
+  });
 });
 
 describe('students routes — status, delete, restore', () => {
