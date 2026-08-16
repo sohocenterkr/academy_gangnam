@@ -4,6 +4,7 @@ import { ApiRequestError, apiGet, apiPost } from '../../lib/apiClient';
 interface CheckIn {
   id: string;
   studentId: string;
+  studentName: string;
   checkInDate: string;
   checkInAt: string;
   source: string;
@@ -102,7 +103,7 @@ export function AdminCheckInsPage() {
         {rows.map((row) => (
           <li key={row.id} className="flex items-center justify-between rounded border border-gray-200 p-2">
             <div>
-              {row.checkInDate} — <span>{row.status}</span> ({row.source})
+              {row.studentName} — {row.checkInDate} — <span>{row.status}</span> ({row.source})
             </div>
             {row.status === 'active' && (
               <button type="button" onClick={() => handleCancel(row.id)} className="text-sm text-red-600 underline">

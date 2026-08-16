@@ -7,9 +7,7 @@ interface Candidate {
 }
 
 type SearchResponse = { status: 'no_match' } | { status: 'candidates'; candidates: Candidate[] };
-type ConfirmResponse =
-  | { status: 'confirmed'; checkInAt: string; maskedName: string }
-  | { status: 'already_checked_in'; checkInAt: string };
+type ConfirmResponse = { status: 'confirmed'; checkInAt: string; maskedName: string };
 
 export function CheckInKioskPage() {
   const [last4, setLast4] = useState('');
@@ -47,12 +45,8 @@ export function CheckInKioskPage() {
     setError(null);
     try {
       const response = await apiPost<ConfirmResponse>('/api/check-in/confirm', { selectionToken });
-      if (response.status === 'confirmed') {
-        setConfirmed({ maskedName: response.maskedName, checkInAt: response.checkInAt });
-        setCandidates(null);
-      } else {
-        setError(`이미 ${response.checkInAt}에 등원했습니다.`);
-      }
+      setConfirmed({ maskedName: response.maskedName, checkInAt: response.checkInAt });
+      setCandidates(null);
     } catch (err) {
       setError(err instanceof ApiRequestError ? err.message : '등원 처리에 실패했습니다.');
     }
