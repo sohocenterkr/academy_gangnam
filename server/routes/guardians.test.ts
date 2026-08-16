@@ -1,8 +1,19 @@
-import { eq, ilike } from 'drizzle-orm';
+import { and, eq, ilike, inArray } from 'drizzle-orm';
 import { afterEach, describe, expect, it } from 'vitest';
 import request from 'supertest';
 import { db } from '../db';
-import { admins, auditLogs, authSessions, passwordResetTokens, roles, guardians } from '@shared/schema';
+import {
+  admins,
+  auditLogs,
+  authSessions,
+  passwordResetTokens,
+  roles,
+  guardians,
+  students,
+  gradeLevels,
+  studentGuardians,
+  studentCheckinPhones,
+} from '@shared/schema';
 import { hashPassword } from '../utils/password';
 import { SUPER_ADMIN_WILDCARD_PERMISSION } from '@shared/permissions';
 import { createFakeEmailAdapter } from '../services/email';
@@ -35,6 +46,24 @@ async function loginAs(app: ReturnType<typeof createApp>, email: string): Promis
 }
 
 async function cleanup() {
+  const testStudents = await db.select({ id: students.id }).from(students).where(ilike(students.name, 'test-guardian-link-%'));
+  if (testStudents.length > 0) {
+    await db.delete(studentGuardians).where(
+      inArray(
+        studentGuardians.studentId,
+        testStudents.map((s) => s.id)
+      )
+    );
+    await db.delete(studentCheckinPhones).where(
+      inArray(
+        studentCheckinPhones.studentId,
+        testStudents.map((s) => s.id)
+      )
+    );
+  }
+  await db.delete(students).where(ilike(students.name, 'test-guardian-link-%'));
+  await db.delete(gradeLevels).where(ilike(gradeLevels.name, 'test-guardian-link-%'));
+
   await db.delete(guardians).where(eq(guardians.name, TEST_GUARDIAN_NAME));
   // Catches any other test-created guardian by naming convention (e.g. the second guardian in the
   // duplicate-phone-warning tests), regardless of which test created it or whether that test's own
@@ -237,5 +266,46 @@ describe('guardians routes — detail and update', () => {
 
     const statuses = [first.status, second.status].sort();
     expect(statuses).toEqual([200, 409]);
+  });
+
+  it('syncs student_checkin_phones for every linked student when the guardian phone changes', async () => {
+    await seedSuperAdmin();
+    const app = createApp({ emailAdapter: createFakeEmailAdapter() });
+    const cookie = await loginAs(app, SUPER_EMAIL);
+
+    const [grade] = await db.insert(gradeLevels).values({ name: 'test-guardian-link-grade', sortOrder: 0 }).returning();
+    const [student] = await db
+      .insert(students)
+      .values({
+        name: 'test-guardian-link-학생',
+        phoneNormalized: '01000001111',
+        gradeLevelId: grade!.id,
+        registrationDate: '2026-08-16',
+        statusEffectiveDate: '2026-08-16',
+      })
+      .returning();
+
+    const created = await request(app)
+      .post('/api/guardians')
+      .set('Cookie', cookie)
+      .send({ name: TEST_GUARDIAN_NAME, phone: TEST_GUARDIAN_PHONE });
+    const guardianId = created.body.data.guardian.id;
+
+    await request(app).post(`/api/students/${student!.id}/guardians`).set('Cookie', cookie).send({ guardianId });
+
+    const newPhone = '01022223333';
+    const updated = await request(app)
+      .patch(`/api/guardians/${guardianId}`)
+      .set('Cookie', cookie)
+      .send({ phone: newPhone, expectedUpdatedAt: created.body.data.guardian.updatedAt });
+    expect(updated.status).toBe(200);
+
+    const [phoneRow] = await db
+      .select()
+      .from(studentCheckinPhones)
+      .where(and(eq(studentCheckinPhones.sourceType, 'guardian'), eq(studentCheckinPhones.sourceId, guardianId)));
+    expect(phoneRow).toBeDefined();
+    expect(phoneRow!.phoneNormalized).toBe(newPhone);
+    expect(phoneRow!.phoneLast4).toBe('3333');
   });
 });

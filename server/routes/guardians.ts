@@ -11,6 +11,7 @@ import { parseBody } from '../utils/validate';
 import { createRequireAuth } from '../middleware/auth';
 import { createRequirePermission } from '../middleware/permissions';
 import { writeAuditLog } from '../services/audit';
+import { syncGuardianPhone } from '../utils/checkinPhones';
 
 const listQuerySchema = z.object({
   search: z.string().optional(),
@@ -213,16 +214,23 @@ export function createGuardiansRouter(deps: GuardiansRouterDeps): Router {
     }
 
     const { expectedUpdatedAt, phone: _phone, confirmDuplicate: _confirm, ...rest } = parsed;
-    const [updated] = await db
-      .update(guardians)
-      .set({
-        ...rest,
-        ...(phoneNormalized !== undefined ? { phoneNormalized } : {}),
-        updatedBy: req.admin!.id,
-        updatedAt: new Date(),
-      })
-      .where(and(eq(guardians.id, id), eq(guardians.updatedAt, new Date(expectedUpdatedAt))))
-      .returning();
+    const updated = await db.transaction(async (tx) => {
+      const [row] = await tx
+        .update(guardians)
+        .set({
+          ...rest,
+          ...(phoneNormalized !== undefined ? { phoneNormalized } : {}),
+          updatedBy: req.admin!.id,
+          updatedAt: new Date(),
+        })
+        .where(and(eq(guardians.id, id), eq(guardians.updatedAt, new Date(expectedUpdatedAt))))
+        .returning();
+      if (!row) return undefined;
+      if (phoneNormalized !== undefined) {
+        await syncGuardianPhone(tx, row.id, phoneNormalized);
+      }
+      return row;
+    });
     if (!updated) {
       res.status(409).json({
         error: { code: 'VERSION_CONFLICT', message: '다른 곳에서 이미 변경되었습니다. 새로고침 후 다시 시도해 주세요.', requestId: req.requestId },

@@ -6,12 +6,13 @@ import { PERMISSIONS } from '@shared/permissions';
 import { maskName } from '@shared/masking';
 import { maskPhone, normalizePhone } from '@shared/phone';
 import { db } from '../db';
-import { students, studentGuardians, guardians } from '@shared/schema';
+import { students, studentGuardians, guardians, studentCheckinPhones } from '@shared/schema';
 import { parseBody } from '../utils/validate';
 import { createRequireAuth } from '../middleware/auth';
 import { createRequirePermission } from '../middleware/permissions';
 import { writeAuditLog } from '../services/audit';
 import { unsetOtherPrimaryGuardians } from '../utils/studentGuardians';
+import { syncStudentOwnPhone, upsertGuardianLinkPhone } from '../utils/checkinPhones';
 
 const STATUS_VALUES = ['enrolled', 'paused', 'withdrawn', 'graduated'] as const;
 
@@ -183,25 +184,30 @@ export function createStudentsRouter(deps: StudentsRouterDeps): Router {
 
     let created;
     try {
-      [created] = await db
-        .insert(students)
-        .values({
-          name: parsed.name,
-          phoneNormalized,
-          gradeLevelId: parsed.gradeLevelId,
-          schoolId: parsed.schoolId,
-          birthDate: parsed.birthDate,
-          address: parsed.address,
-          registrationDate,
-          statusEffectiveDate: registrationDate,
-          specialNotes: parsed.specialNotes,
-          counselingNotes: parsed.counselingNotes,
-          createdBy: req.admin!.id,
-          updatedBy: req.admin!.id,
-          createdAt: new Date(),
-          updatedAt: new Date(),
-        })
-        .returning();
+      created = await db.transaction(async (tx) => {
+        const [row] = await tx
+          .insert(students)
+          .values({
+            name: parsed.name,
+            phoneNormalized,
+            gradeLevelId: parsed.gradeLevelId,
+            schoolId: parsed.schoolId,
+            birthDate: parsed.birthDate,
+            address: parsed.address,
+            registrationDate,
+            statusEffectiveDate: registrationDate,
+            specialNotes: parsed.specialNotes,
+            counselingNotes: parsed.counselingNotes,
+            createdBy: req.admin!.id,
+            updatedBy: req.admin!.id,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+          })
+          .returning();
+        if (!row) return undefined;
+        await syncStudentOwnPhone(tx, row.id, phoneNormalized);
+        return row;
+      });
     } catch (error) {
       if (isForeignKeyViolation(error)) {
         res.status(400).json({
@@ -326,16 +332,23 @@ export function createStudentsRouter(deps: StudentsRouterDeps): Router {
 
     let updated;
     try {
-      [updated] = await db
-        .update(students)
-        .set({
-          ...rest,
-          ...(phoneNormalized !== undefined ? { phoneNormalized } : {}),
-          updatedBy: req.admin!.id,
-          updatedAt: new Date(),
-        })
-        .where(and(eq(students.id, id), eq(students.updatedAt, new Date(expectedUpdatedAt))))
-        .returning();
+      updated = await db.transaction(async (tx) => {
+        const [row] = await tx
+          .update(students)
+          .set({
+            ...rest,
+            ...(phoneNormalized !== undefined ? { phoneNormalized } : {}),
+            updatedBy: req.admin!.id,
+            updatedAt: new Date(),
+          })
+          .where(and(eq(students.id, id), eq(students.updatedAt, new Date(expectedUpdatedAt))))
+          .returning();
+        if (!row) return undefined;
+        if (phoneNormalized !== undefined) {
+          await syncStudentOwnPhone(tx, row.id, phoneNormalized);
+        }
+        return row;
+      });
     } catch (error) {
       if (isForeignKeyViolation(error)) {
         res.status(400).json({
@@ -435,6 +448,7 @@ export function createStudentsRouter(deps: StudentsRouterDeps): Router {
     }
 
     await db.update(students).set({ deletedAt: new Date(), updatedBy: req.admin!.id, updatedAt: new Date() }).where(eq(students.id, id));
+    await db.update(studentCheckinPhones).set({ isActive: false, updatedAt: new Date() }).where(eq(studentCheckinPhones.studentId, id));
 
     await writeAuditLog({
       adminId: req.admin!.id,
@@ -469,6 +483,7 @@ export function createStudentsRouter(deps: StudentsRouterDeps): Router {
       .set({ deletedAt: null, updatedBy: req.admin!.id, updatedAt: new Date() })
       .where(eq(students.id, id))
       .returning();
+    await db.update(studentCheckinPhones).set({ isActive: true, updatedAt: new Date() }).where(eq(studentCheckinPhones.studentId, id));
 
     await writeAuditLog({
       adminId: req.admin!.id,
@@ -524,6 +539,9 @@ export function createStudentsRouter(deps: StudentsRouterDeps): Router {
             updatedAt: new Date(),
           })
           .returning();
+        if (row) {
+          await upsertGuardianLinkPhone(tx, id, parsed.guardianId, guardian.phoneNormalized, row.useForCheckin);
+        }
         return row;
       });
     } catch (error) {

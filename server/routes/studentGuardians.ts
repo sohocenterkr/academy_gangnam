@@ -4,13 +4,14 @@ import { z } from 'zod';
 import { getNowKSTISOString } from '@shared/kst';
 import { PERMISSIONS } from '@shared/permissions';
 import { db } from '../db';
-import { studentGuardians } from '@shared/schema';
+import { studentGuardians, guardians } from '@shared/schema';
 import { parseBody } from '../utils/validate';
 import { createRequireAuth } from '../middleware/auth';
 import { createRequirePermission } from '../middleware/permissions';
 import { writeAuditLog } from '../services/audit';
 import { unsetOtherPrimaryGuardians } from '../utils/studentGuardians';
 import { sendVersionConflict } from '../utils/httpErrors';
+import { upsertGuardianLinkPhone, removeGuardianLinkPhone } from '../utils/checkinPhones';
 
 class OptimisticLockError extends Error {}
 
@@ -77,6 +78,10 @@ export function createStudentGuardiansRouter(deps: StudentGuardiansRouterDeps): 
         if (!row) {
           throw new OptimisticLockError();
         }
+        const [guardianRow] = await tx.select().from(guardians).where(eq(guardians.id, row.guardianId));
+        if (guardianRow) {
+          await upsertGuardianLinkPhone(tx, row.studentId, row.guardianId, guardianRow.phoneNormalized, row.useForCheckin);
+        }
         return row;
       });
     } catch (error) {
@@ -121,7 +126,10 @@ export function createStudentGuardiansRouter(deps: StudentGuardiansRouterDeps): 
       return;
     }
 
-    await db.delete(studentGuardians).where(eq(studentGuardians.id, id));
+    await db.transaction(async (tx) => {
+      await tx.delete(studentGuardians).where(eq(studentGuardians.id, id));
+      await removeGuardianLinkPhone(tx, existing.studentId, existing.guardianId);
+    });
 
     await writeAuditLog({
       adminId: req.admin!.id,

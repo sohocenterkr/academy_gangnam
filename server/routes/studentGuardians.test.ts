@@ -1,8 +1,8 @@
-import { eq, ilike, inArray } from 'drizzle-orm';
+import { and, eq, ilike, inArray } from 'drizzle-orm';
 import { afterEach, describe, expect, it } from 'vitest';
 import request from 'supertest';
 import { db } from '../db';
-import { admins, roles, students, gradeLevels, guardians, studentGuardians } from '@shared/schema';
+import { admins, roles, students, gradeLevels, guardians, studentGuardians, studentCheckinPhones } from '@shared/schema';
 import { hashPassword } from '../utils/password';
 import { SUPER_ADMIN_WILDCARD_PERMISSION } from '@shared/permissions';
 import { createFakeEmailAdapter } from '../services/email';
@@ -52,6 +52,12 @@ async function cleanup() {
     await db.delete(studentGuardians).where(
       inArray(
         studentGuardians.studentId,
+        testStudents.map((s) => s.id)
+      )
+    );
+    await db.delete(studentCheckinPhones).where(
+      inArray(
+        studentCheckinPhones.studentId,
         testStudents.map((s) => s.id)
       )
     );
@@ -211,5 +217,63 @@ describe('student-guardians routes', () => {
 
     const detail = await request(app).get(`/api/students/${studentId}`).set('Cookie', cookie);
     expect(detail.body.data.guardians).toHaveLength(0);
+  });
+
+  it('keeps student_checkin_phones in sync across link create, useForCheckin toggle, and unlink', async () => {
+    const { studentId, guardianId } = await seedFixtures();
+    const app = createApp({ emailAdapter: createFakeEmailAdapter() });
+    const cookie = await loginAs(app, SUPER_EMAIL);
+
+    const linked = await request(app)
+      .post(`/api/students/${studentId}/guardians`)
+      .set('Cookie', cookie)
+      .send({ guardianId, useForCheckin: true });
+    expect(linked.status).toBe(200);
+
+    const [afterLink] = await db
+      .select()
+      .from(studentCheckinPhones)
+      .where(
+        and(
+          eq(studentCheckinPhones.studentId, studentId),
+          eq(studentCheckinPhones.sourceType, 'guardian'),
+          eq(studentCheckinPhones.sourceId, guardianId)
+        )
+      );
+    expect(afterLink).toBeDefined();
+    expect(afterLink!.isActive).toBe(true);
+
+    const edited = await request(app)
+      .patch(`/api/student-guardians/${linked.body.data.id}`)
+      .set('Cookie', cookie)
+      .send({ useForCheckin: false, expectedUpdatedAt: linked.body.data.updatedAt });
+    expect(edited.status).toBe(200);
+
+    const [afterToggle] = await db
+      .select()
+      .from(studentCheckinPhones)
+      .where(
+        and(
+          eq(studentCheckinPhones.studentId, studentId),
+          eq(studentCheckinPhones.sourceType, 'guardian'),
+          eq(studentCheckinPhones.sourceId, guardianId)
+        )
+      );
+    expect(afterToggle!.isActive).toBe(false);
+
+    const deleted = await request(app).delete(`/api/student-guardians/${linked.body.data.id}`).set('Cookie', cookie);
+    expect(deleted.status).toBe(200);
+
+    const rowsAfterDelete = await db
+      .select()
+      .from(studentCheckinPhones)
+      .where(
+        and(
+          eq(studentCheckinPhones.studentId, studentId),
+          eq(studentCheckinPhones.sourceType, 'guardian'),
+          eq(studentCheckinPhones.sourceId, guardianId)
+        )
+      );
+    expect(rowsAfterDelete).toHaveLength(0);
   });
 });

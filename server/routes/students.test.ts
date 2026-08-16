@@ -1,8 +1,8 @@
-import { eq, ilike, inArray } from 'drizzle-orm';
+import { and, eq, ilike, inArray } from 'drizzle-orm';
 import { afterEach, describe, expect, it } from 'vitest';
 import request from 'supertest';
 import { db } from '../db';
-import { admins, roles, students, gradeLevels, studentGuardians } from '@shared/schema';
+import { admins, roles, students, gradeLevels, studentGuardians, studentCheckinPhones } from '@shared/schema';
 import { hashPassword } from '../utils/password';
 import { SUPER_ADMIN_WILDCARD_PERMISSION } from '@shared/permissions';
 import { createFakeEmailAdapter } from '../services/email';
@@ -43,6 +43,12 @@ async function cleanup() {
     await db.delete(studentGuardians).where(
       inArray(
         studentGuardians.studentId,
+        testStudents.map((s) => s.id)
+      )
+    );
+    await db.delete(studentCheckinPhones).where(
+      inArray(
+        studentCheckinPhones.studentId,
         testStudents.map((s) => s.id)
       )
     );
@@ -342,6 +348,58 @@ describe('students routes — status, delete, restore', () => {
 
     const afterRestore = await request(app).get(`/api/students/${studentId}`).set('Cookie', cookie);
     expect(afterRestore.status).toBe(200);
+  });
+
+  it('keeps student_checkin_phones in sync across create, phone update, delete, and restore', async () => {
+    const { gradeLevelId } = await seedSuperAdminAndGrade();
+    const app = createApp({ emailAdapter: createFakeEmailAdapter() });
+    const cookie = await loginAs(app, SUPER_EMAIL);
+
+    const created = await request(app)
+      .post('/api/students')
+      .set('Cookie', cookie)
+      .send({ name: TEST_STUDENT_NAME, phone: TEST_STUDENT_PHONE, gradeLevelId });
+    const studentId = created.body.data.student.id;
+
+    const [afterCreate] = await db
+      .select()
+      .from(studentCheckinPhones)
+      .where(and(eq(studentCheckinPhones.studentId, studentId), eq(studentCheckinPhones.sourceType, 'student')));
+    expect(afterCreate).toBeDefined();
+    expect(afterCreate!.phoneLast4).toBe('8888');
+    expect(afterCreate!.isActive).toBe(true);
+
+    const newPhone = '01055557777';
+    const edited = await request(app)
+      .patch(`/api/students/${studentId}`)
+      .set('Cookie', cookie)
+      .send({ phone: newPhone, expectedUpdatedAt: created.body.data.student.updatedAt });
+    expect(edited.status).toBe(200);
+
+    const [afterUpdate] = await db
+      .select()
+      .from(studentCheckinPhones)
+      .where(and(eq(studentCheckinPhones.studentId, studentId), eq(studentCheckinPhones.sourceType, 'student')));
+    expect(afterUpdate!.phoneNormalized).toBe(newPhone);
+    expect(afterUpdate!.phoneLast4).toBe('7777');
+
+    const deleted = await request(app).delete(`/api/students/${studentId}`).set('Cookie', cookie);
+    expect(deleted.status).toBe(200);
+
+    const [afterDelete] = await db
+      .select()
+      .from(studentCheckinPhones)
+      .where(and(eq(studentCheckinPhones.studentId, studentId), eq(studentCheckinPhones.sourceType, 'student')));
+    expect(afterDelete!.isActive).toBe(false);
+
+    const restored = await request(app).post(`/api/students/${studentId}/restore`).set('Cookie', cookie);
+    expect(restored.status).toBe(200);
+
+    const [afterRestorePhone] = await db
+      .select()
+      .from(studentCheckinPhones)
+      .where(and(eq(studentCheckinPhones.studentId, studentId), eq(studentCheckinPhones.sourceType, 'student')));
+    expect(afterRestorePhone!.isActive).toBe(true);
   });
 });
 
