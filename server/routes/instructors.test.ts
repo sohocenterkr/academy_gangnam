@@ -67,7 +67,7 @@ describe('instructors routes', () => {
     const created = await request(app)
       .post('/api/instructors')
       .set('Cookie', cookie)
-      .send({ name: TEST_INSTRUCTOR_NAME, phoneNormalized: '01099998888', subjects: ['수학'] });
+      .send({ name: TEST_INSTRUCTOR_NAME, phone: '01099998888', subjects: ['수학'] });
     expect(created.status).toBe(200);
     expect(created.body.data.status).toBe('active');
 
@@ -88,5 +88,32 @@ describe('instructors routes', () => {
       .send({ status: 'active', expectedUpdatedAt: created.body.data.updatedAt });
     expect(staleUpdate.status).toBe(409);
     expect(staleUpdate.body.error.code).toBe('VERSION_CONFLICT');
+  });
+
+  it('accepts a dashed/spaced display-format phone on create and normalizes it to digits only', async () => {
+    await seedAdmin();
+    const app = createApp({ emailAdapter: createFakeEmailAdapter() });
+    const cookie = await loginAs(app, SUPER_EMAIL);
+
+    const created = await request(app)
+      .post('/api/instructors')
+      .set('Cookie', cookie)
+      .send({ name: TEST_INSTRUCTOR_NAME, phone: '010-1234-5678', subjects: ['수학'] });
+    expect(created.status).toBe(200);
+    expect(created.body.data.phoneNormalized).toBe('01012345678');
+  });
+
+  it('rejects a genuinely invalid phone with a 400 and fieldErrors.phone', async () => {
+    await seedAdmin();
+    const app = createApp({ emailAdapter: createFakeEmailAdapter() });
+    const cookie = await loginAs(app, SUPER_EMAIL);
+
+    const created = await request(app)
+      .post('/api/instructors')
+      .set('Cookie', cookie)
+      .send({ name: TEST_INSTRUCTOR_NAME, phone: '---', subjects: ['수학'] });
+    expect(created.status).toBe(400);
+    expect(created.body.error.code).toBe('VALIDATION_ERROR');
+    expect(created.body.error.fieldErrors.phone).toBeDefined();
   });
 });

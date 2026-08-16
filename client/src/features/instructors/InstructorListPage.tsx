@@ -38,7 +38,7 @@ export function InstructorListPage() {
     try {
       await apiPost('/api/instructors', {
         name,
-        phoneNormalized: phone,
+        phone,
         subjects: subjects
           .split(',')
           .map((subject) => subject.trim())

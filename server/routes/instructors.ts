@@ -3,6 +3,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { getNowKSTISOString } from '@shared/kst';
 import { PERMISSIONS } from '@shared/permissions';
+import { normalizePhone } from '@shared/phone';
 import { db } from '../db';
 import { instructors } from '@shared/schema';
 import { parseBody } from '../utils/validate';
@@ -13,7 +14,7 @@ import { sendVersionConflict } from '../utils/httpErrors';
 
 const createInstructorSchema = z.object({
   name: z.string().min(1),
-  phoneNormalized: z.string().regex(/^\d{9,11}$/),
+  phone: z.string().min(1),
   subjects: z.array(z.string()).default([]),
   adminId: z.string().optional(),
   notes: z.string().optional(),
@@ -21,13 +22,24 @@ const createInstructorSchema = z.object({
 
 const updateInstructorSchema = z.object({
   name: z.string().min(1).optional(),
-  phoneNormalized: z.string().regex(/^\d{9,11}$/).optional(),
+  phone: z.string().min(1).optional(),
   subjects: z.array(z.string()).optional(),
   adminId: z.string().optional(),
   status: z.enum(['active', 'inactive']).optional(),
   notes: z.string().optional(),
   expectedUpdatedAt: z.iso.datetime(),
 });
+
+function invalidPhoneError(requestId: string) {
+  return {
+    error: {
+      code: 'VALIDATION_ERROR',
+      message: '입력값을 확인해 주세요.',
+      fieldErrors: { phone: ['전화번호를 확인해 주세요.'] },
+      requestId,
+    },
+  };
+}
 
 export interface InstructorsRouterDeps {
   sessionSecret: string;
@@ -47,10 +59,17 @@ export function createInstructorsRouter(deps: InstructorsRouterDeps): Router {
     const parsed = parseBody(createInstructorSchema, req.body, res, req.requestId);
     if (!parsed) return;
 
+    const phoneNormalized = normalizePhone(parsed.phone);
+    if (!phoneNormalized) {
+      res.status(400).json(invalidPhoneError(req.requestId));
+      return;
+    }
+
     const now = new Date();
+    const { phone: _phone, ...rest } = parsed;
     const [created] = await db
       .insert(instructors)
-      .values({ ...parsed, status: 'active', createdAt: now, updatedAt: now, createdBy: req.admin!.id, updatedBy: req.admin!.id })
+      .values({ ...rest, phoneNormalized, status: 'active', createdAt: now, updatedAt: now, createdBy: req.admin!.id, updatedBy: req.admin!.id })
       .returning();
     if (!created) {
       res.status(500).json({ error: { code: 'INTERNAL_ERROR', message: '강사를 등록하지 못했습니다.', requestId: req.requestId } });
@@ -88,10 +107,24 @@ export function createInstructorsRouter(deps: InstructorsRouterDeps): Router {
       return;
     }
 
-    const { expectedUpdatedAt, ...changes } = parsed;
+    let phoneNormalized: string | undefined;
+    if (parsed.phone !== undefined) {
+      phoneNormalized = normalizePhone(parsed.phone);
+      if (!phoneNormalized) {
+        res.status(400).json(invalidPhoneError(req.requestId));
+        return;
+      }
+    }
+
+    const { expectedUpdatedAt, phone: _phone, ...changes } = parsed;
     const [updated] = await db
       .update(instructors)
-      .set({ ...changes, updatedBy: req.admin!.id, updatedAt: new Date() })
+      .set({
+        ...changes,
+        ...(phoneNormalized !== undefined ? { phoneNormalized } : {}),
+        updatedBy: req.admin!.id,
+        updatedAt: new Date(),
+      })
       .where(and(eq(instructors.id, id), eq(instructors.updatedAt, new Date(expectedUpdatedAt))))
       .returning();
     if (!updated) {

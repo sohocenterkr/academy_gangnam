@@ -73,7 +73,7 @@ describe('InstructorListPage', () => {
         '/api/instructors',
         expect.objectContaining({
           method: 'POST',
-          body: JSON.stringify({ name: '박선생', phoneNormalized: '01033334444', subjects: ['국어', '사회'] }),
+          body: JSON.stringify({ name: '박선생', phone: '01033334444', subjects: ['국어', '사회'] }),
         })
       )
     );
