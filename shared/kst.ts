@@ -10,6 +10,10 @@ export function getTodayKST(date: Date = new Date()): string {
   }).format(date);
 }
 
+export function formatTimeKST(date: Date): string {
+  return new Intl.DateTimeFormat('ko-KR', { timeZone: KST_TIME_ZONE, hour: '2-digit', minute: '2-digit' }).format(date);
+}
+
 export function getNowKSTISOString(date: Date = new Date()): string {
   const datePart = getTodayKST(date);
   const timePart = new Intl.DateTimeFormat('en-GB', {

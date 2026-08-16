@@ -11,7 +11,7 @@ export interface RateLimiterOptions {
  * serverless function instances — revisit with a DB- or Redis-backed limiter before/when this
  * app is deployed to Vercel's multi-instance production environment (see CLAUDE.md).
  */
-export function createRateLimiter(options: RateLimiterOptions): RequestHandler {
+export function createRateLimitMiddleware(options: RateLimiterOptions): RequestHandler {
   const buckets = new Map<string, number[]>();
 
   return (req: Request, res: Response, next: NextFunction) => {

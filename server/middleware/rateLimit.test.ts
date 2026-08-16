@@ -1,16 +1,16 @@
 import express from 'express';
 import request from 'supertest';
 import { describe, expect, it } from 'vitest';
-import { createRateLimiter } from './rateLimit';
+import { createRateLimitMiddleware } from './rateLimit';
 
 function buildApp() {
   const app = express();
-  app.use(createRateLimiter({ windowMs: 1000, max: 2 }));
+  app.use(createRateLimitMiddleware({ windowMs: 1000, max: 2 }));
   app.get('/ping', (_req, res) => res.json({ ok: true }));
   return app;
 }
 
-describe('createRateLimiter', () => {
+describe('createRateLimitMiddleware', () => {
   it('allows requests up to the limit, then rejects with 429', async () => {
     const app = buildApp();
 
@@ -26,7 +26,7 @@ describe('createRateLimiter', () => {
 
   it('resets after the window elapses', async () => {
     const app = express();
-    app.use(createRateLimiter({ windowMs: 50, max: 1 }));
+    app.use(createRateLimitMiddleware({ windowMs: 50, max: 1 }));
     app.get('/ping', (_req, res) => res.json({ ok: true }));
 
     const first = await request(app).get('/ping');
