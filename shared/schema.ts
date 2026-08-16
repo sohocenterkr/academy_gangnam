@@ -260,3 +260,114 @@ export const studentCheckinPhones = pgTable(
     index('student_checkin_phones_student_active_idx').on(table.studentId, table.isActive),
   ]
 );
+
+export const instructors = pgTable('instructors', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  name: text('name').notNull(),
+  phoneNormalized: text('phone_normalized').notNull(),
+  subjects: jsonb('subjects').$type<string[]>().notNull().default([]),
+  adminId: uuid('admin_id').references(() => admins.id),
+  status: text('status', { enum: ['active', 'inactive'] }).notNull().default('active'),
+  notes: text('notes'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull(),
+  createdBy: uuid('created_by').references(() => admins.id),
+  updatedBy: uuid('updated_by').references(() => admins.id),
+});
+
+export const courses = pgTable(
+  'courses',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    code: text('code').notNull(),
+    name: text('name').notNull(),
+    category: text('category'),
+    targetGradeIds: jsonb('target_grade_ids').$type<string[]>().notNull().default([]),
+    instructorId: uuid('instructor_id').references(() => instructors.id),
+    classroom: text('classroom'),
+    capacity: integer('capacity'),
+    baseFee: integer('base_fee'),
+    startDate: date('start_date'),
+    endDate: date('end_date'),
+    status: text('status', { enum: ['recruiting', 'closed', 'ended', 'inactive'] })
+      .notNull()
+      .default('recruiting'),
+    description: text('description'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull(),
+    createdBy: uuid('created_by').references(() => admins.id),
+    updatedBy: uuid('updated_by').references(() => admins.id),
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
+  },
+  (table) => [
+    uniqueIndex('courses_code_unique')
+      .on(table.code)
+      .where(sql`${table.deletedAt} IS NULL`),
+  ]
+);
+
+export const courseSchedules = pgTable('course_schedules', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  courseId: uuid('course_id')
+    .notNull()
+    .references(() => courses.id),
+  dayOfWeek: integer('day_of_week').notNull(),
+  startTime: text('start_time').notNull(),
+  endTime: text('end_time').notNull(),
+  classroom: text('classroom'),
+  instructorId: uuid('instructor_id').references(() => instructors.id),
+  repeatStartDate: date('repeat_start_date'),
+  repeatEndDate: date('repeat_end_date'),
+  isActive: boolean('is_active').notNull().default(true),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull(),
+  createdBy: uuid('created_by').references(() => admins.id),
+  updatedBy: uuid('updated_by').references(() => admins.id),
+});
+
+export const courseExceptions = pgTable('course_exceptions', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  courseId: uuid('course_id')
+    .notNull()
+    .references(() => courses.id),
+  scheduleId: uuid('schedule_id').references(() => courseSchedules.id),
+  exceptionType: text('exception_type', { enum: ['cancellation', 'makeup'] }).notNull(),
+  eventDate: date('event_date').notNull(),
+  startTime: text('start_time'),
+  endTime: text('end_time'),
+  reason: text('reason'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull(),
+  createdBy: uuid('created_by').references(() => admins.id),
+  updatedBy: uuid('updated_by').references(() => admins.id),
+});
+
+export const enrollments = pgTable(
+  'enrollments',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    studentId: uuid('student_id')
+      .notNull()
+      .references(() => students.id),
+    courseId: uuid('course_id')
+      .notNull()
+      .references(() => courses.id),
+    startDate: date('start_date').notNull(),
+    plannedEndDate: date('planned_end_date'),
+    actualEndDate: date('actual_end_date'),
+    status: text('status', { enum: ['waiting', 'active', 'paused', 'ended', 'canceled'] })
+      .notNull()
+      .default('active'),
+    tuitionAmount: integer('tuition_amount'),
+    adjustmentNote: text('adjustment_note'),
+    memo: text('memo'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull(),
+    createdBy: uuid('created_by').references(() => admins.id),
+    updatedBy: uuid('updated_by').references(() => admins.id),
+  },
+  (table) => [
+    index('enrollments_student_status_start_idx').on(table.studentId, table.status, table.startDate),
+    index('enrollments_course_status_start_idx').on(table.courseId, table.status, table.startDate),
+  ]
+);

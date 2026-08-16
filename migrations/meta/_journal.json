@@ -43,6 +43,13 @@
       "when": 1786876595290,
       "tag": "0005_deep_cerise",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1786885408519,
+      "tag": "0006_fair_prodigy",
+      "breakpoints": true
     }
   ]
 }
