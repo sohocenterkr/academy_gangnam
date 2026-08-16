@@ -39,6 +39,11 @@ export function AdminHomePage() {
             </Link>
           </li>
           <li>
+            <Link href="/admin/instructors" className="text-blue-600 underline">
+              강사 관리
+            </Link>
+          </li>
+          <li>
             <Link href="/admin/profile" className="text-blue-600 underline">
               내 계정
             </Link>

@@ -11,6 +11,7 @@ import { StudentListPage } from './features/students/StudentListPage';
 import { StudentDetailPage } from './features/students/StudentDetailPage';
 import { CheckInKioskPage } from './features/checkin/CheckInKioskPage';
 import { AdminCheckInsPage } from './features/checkin/AdminCheckInsPage';
+import { InstructorListPage } from './features/instructors/InstructorListPage';
 import { ProtectedRoute } from './components/layout/ProtectedRoute';
 
 export function AppRoutes() {
@@ -62,6 +63,11 @@ export function AppRoutes() {
       <Route path="/admin/check-ins">
         <ProtectedRoute>
           <AdminCheckInsPage />
+        </ProtectedRoute>
+      </Route>
+      <Route path="/admin/instructors">
+        <ProtectedRoute>
+          <InstructorListPage />
         </ProtectedRoute>
       </Route>
     </Switch>
