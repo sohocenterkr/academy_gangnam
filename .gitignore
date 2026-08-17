@@ -6,3 +6,6 @@ coverage/
 playwright-report/
 test-results/
 *.log
+
+.vercel
+.env*
