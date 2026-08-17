@@ -7,6 +7,27 @@ import { createApp } from './app';
 import { loadEnv } from './env';
 import { bootstrapAdmin } from './services/bootstrapAdmin';
 
+// TEMPORARY DIAGNOSTIC — remove before finishing deployment setup.
+console.log(
+  'env presence check:',
+  JSON.stringify(
+    Object.fromEntries(
+      [
+        'NODE_ENV',
+        'PORT',
+        'APP_URL',
+        'DATABASE_URL',
+        'AUTH_SESSION_SECRET',
+        'INITIAL_ADMIN_EMAIL',
+        'INITIAL_ADMIN_PASSWORD',
+        'INITIAL_ADMIN_NAME',
+        'RESEND_API_KEY',
+        'RESEND_FROM_EMAIL',
+      ].map((key) => [key, { present: key in process.env, length: process.env[key]?.length ?? -1 }])
+    )
+  )
+);
+
 const env = loadEnv();
 const app = createApp();
 
