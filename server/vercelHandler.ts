@@ -1,7 +1,11 @@
+// Source for the Vercel serverless function, deliberately kept OUTSIDE
+// api/ — see scripts/build-vercel.ts for why. Bundled by that script into
+// .vercel/output/functions/api/index.func/index.js; not imported by
+// server/index.ts (local dev) or any test.
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { createApp } from '../server/app';
-import { loadEnv } from '../server/env';
-import { bootstrapAdmin } from '../server/services/bootstrapAdmin';
+import { createApp } from './app';
+import { loadEnv } from './env';
+import { bootstrapAdmin } from './services/bootstrapAdmin';
 
 const env = loadEnv();
 const app = createApp();

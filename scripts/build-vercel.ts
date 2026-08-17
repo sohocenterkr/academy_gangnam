@@ -1,12 +1,22 @@
 // Assembles a Vercel Build Output API v3 directory (`.vercel/output/`) by
-// hand instead of relying on Vercel's zero-config Node.js builder for
-// `api/index.ts`. That builder synthesizes its own tsconfig (no root
-// tsconfig.json exists) with strict Node ESM resolution, which cannot see
-// this repo's `@shared/*` path alias or extensionless relative imports —
-// the same relaxed resolution `tsx`/Vite already give the rest of this
-// project. Bundling with esbuild ourselves resolves both at build time, so
-// the deployed function is plain, already-valid JavaScript with nothing
-// left for Vercel to re-interpret.
+// hand instead of relying on Vercel's zero-config Node.js builder.
+//
+// Two independent problems with the zero-config path, both confirmed by
+// deploying and reading the actual runtime logs, not guessed:
+// 1. Vercel's own TS compile step synthesizes its own tsconfig (no root
+//    tsconfig.json exists) with strict Node ESM resolution, which cannot
+//    see this repo's `@shared/*` path alias or the extensionless relative
+//    imports `tsx`/Vite already allow everywhere else in this project.
+// 2. Vercel auto-detects and independently builds ANY source file it finds
+//    under `api/`, regardless of a custom `buildCommand` or a hand-written
+//    `.vercel/output` — that auto-built (broken) version is what actually
+//    got served even after this script started writing a working bundle to
+//    `.vercel/output/functions/api/index.func/`. The fix is to keep no raw
+//    source under `api/` at all: the handler source lives at
+//    `server/vercelHandler.ts` instead, so there is nothing left there for
+//    Vercel's zero-config scanner to find and build on its own — this
+//    script's own Build Output API v3 directory becomes the only
+//    definition of the `/api` route.
 import { build } from 'esbuild';
 import { cp, mkdir, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -32,7 +42,7 @@ async function main() {
   // resolves natively — confirmed by actually running the bundle locally,
   // not just checking that esbuild's own build step reported no errors.
   await build({
-    entryPoints: [path.join(rootDir, 'api', 'index.ts')],
+    entryPoints: [path.join(rootDir, 'server', 'vercelHandler.ts')],
     outfile: path.join(functionDir, 'index.js'),
     bundle: true,
     platform: 'node',
