@@ -129,6 +129,29 @@ export const gradeLevels = pgTable(
   ]
 );
 
+export const optOuts = pgTable(
+  'opt_outs',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    phoneNormalized: text('phone_normalized').notNull(),
+    status: text('status', { enum: ['active', 'released'] })
+      .notNull()
+      .default('active'),
+    effectiveDate: date('effective_date').notNull(),
+    releasedAt: timestamp('released_at', { withTimezone: true }),
+    reason: text('reason'),
+    releaseReason: text('release_reason'),
+    processedBy: uuid('processed_by').references(() => admins.id),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('opt_outs_active_phone_unique')
+      .on(table.phoneNormalized)
+      .where(sql`${table.status} = 'active'`),
+  ]
+);
+
 export const guardians = pgTable(
   'guardians',
   {
@@ -604,4 +627,134 @@ export const aiGenerationLogs = pgTable('ai_generation_logs', {
   errorCode: text('error_code'),
   createdBy: uuid('created_by').references(() => admins.id),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const messageCampaigns = pgTable(
+  'message_campaigns',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    name: text('name').notNull(),
+    createdBy: uuid('created_by').references(() => admins.id),
+    approvedBy: uuid('approved_by').references(() => admins.id),
+    messageType: text('message_type', { enum: ['informational', 'marketing'] }).notNull(),
+    templateId: uuid('template_id').references(() => messageTemplates.id),
+    bodySource: text('body_source').notNull().default(''),
+    recipientType: text('recipient_type', { enum: ['all', 'grade', 'course', 'individual'] }).notNull(),
+    filterSnapshot: jsonb('filter_snapshot').$type<Record<string, unknown>>().notNull().default({}),
+    duplicateStrategy: text('duplicate_strategy', { enum: ['merge', 'separate'] })
+      .notNull()
+      .default('merge'),
+    deviceId: uuid('device_id').references(() => messagingDevices.id),
+    sendMode: text('send_mode', { enum: ['immediate', 'scheduled'] })
+      .notNull()
+      .default('immediate'),
+    scheduledAt: timestamp('scheduled_at', { withTimezone: true }),
+    status: text('status', {
+      enum: ['draft', 'validating', 'ready', 'scheduled', 'queued', 'dispatching', 'partial', 'completed', 'failed', 'canceled'],
+    })
+      .notNull()
+      .default('draft'),
+    // Opted-out recipients are excluded by default; an admin may explicitly override this per
+    // campaign, but only after confirming in the UI — this flag records that confirmation
+    // happened rather than silently including opted-out numbers.
+    optOutOverrideConfirmed: boolean('opt_out_override_confirmed').notNull().default(false),
+    approvedAt: timestamp('approved_at', { withTimezone: true }),
+    startedAt: timestamp('started_at', { withTimezone: true }),
+    finishedAt: timestamp('finished_at', { withTimezone: true }),
+    totalStudents: integer('total_students').notNull().default(0),
+    totalContacts: integer('total_contacts').notNull().default(0),
+    totalSendItems: integer('total_send_items').notNull().default(0),
+    excludedCount: integer('excluded_count').notNull().default(0),
+    failedCount: integer('failed_count').notNull().default(0),
+    idempotencyKey: text('idempotency_key').notNull().default(sql`gen_random_uuid()`),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('message_campaigns_idempotency_key_unique').on(table.idempotencyKey),
+    index('message_campaigns_status_scheduled_idx').on(table.status, table.scheduledAt),
+  ]
+);
+
+export const messageCampaignMedia = pgTable(
+  'message_campaign_media',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    campaignId: uuid('campaign_id')
+      .notNull()
+      .references(() => messageCampaigns.id),
+    mediaId: uuid('media_id')
+      .notNull()
+      .references(() => mediaAssets.id),
+    sortOrder: integer('sort_order').notNull().default(0),
+  },
+  (table) => [index('message_campaign_media_campaign_idx').on(table.campaignId)]
+);
+
+export const messageRecipients = pgTable(
+  'message_recipients',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    campaignId: uuid('campaign_id')
+      .notNull()
+      .references(() => messageCampaigns.id),
+    studentId: uuid('student_id').references(() => students.id),
+    guardianId: uuid('guardian_id').references(() => guardians.id),
+    phoneNormalized: text('phone_normalized').notNull(),
+    relationshipSnapshot: text('relationship_snapshot'),
+    personalizationSnapshot: jsonb('personalization_snapshot').$type<Record<string, unknown>>(),
+    renderedBody: text('rendered_body'),
+    status: text('status', {
+      enum: ['included', 'excluded', 'pending', 'processing', 'device_requested', 'request_failed', 'uncertain', 'canceled'],
+    })
+      .notNull()
+      .default('pending'),
+    exclusionReason: text('exclusion_reason'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index('message_recipients_campaign_phone_idx').on(table.campaignId, table.phoneNormalized)]
+);
+
+export const messageSendItems = pgTable(
+  'message_send_items',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    campaignId: uuid('campaign_id')
+      .notNull()
+      .references(() => messageCampaigns.id),
+    recipientId: uuid('recipient_id')
+      .notNull()
+      .references(() => messageRecipients.id),
+    mediaId: uuid('media_id').references(() => mediaAssets.id),
+    sequenceNo: integer('sequence_no').notNull().default(0),
+    status: text('status', { enum: ['pending', 'processing', 'device_requested', 'request_failed', 'uncertain', 'canceled'] })
+      .notNull()
+      .default('pending'),
+    idempotencyKey: text('idempotency_key').notNull(),
+    requestedAt: timestamp('requested_at', { withTimezone: true }),
+    completedAt: timestamp('completed_at', { withTimezone: true }),
+    lastErrorCode: text('last_error_code'),
+    lastErrorMessageSafe: text('last_error_message_safe'),
+  },
+  (table) => [
+    uniqueIndex('message_send_items_idempotency_key_unique').on(table.idempotencyKey),
+    index('message_send_items_status_sequence_idx').on(table.status, table.sequenceNo),
+  ]
+);
+
+export const messageAttempts = pgTable('message_attempts', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  sendItemId: uuid('send_item_id')
+    .notNull()
+    .references(() => messageSendItems.id),
+  attemptNo: integer('attempt_no').notNull().default(1),
+  deviceId: uuid('device_id').references(() => messagingDevices.id),
+  requestStatus: text('request_status').notNull(),
+  externalReference: text('external_reference'),
+  requestedAt: timestamp('requested_at', { withTimezone: true }).notNull().defaultNow(),
+  respondedAt: timestamp('responded_at', { withTimezone: true }),
+  errorCode: text('error_code'),
+  errorMessageSafe: text('error_message_safe'),
+  retryCampaignId: uuid('retry_campaign_id').references(() => messageCampaigns.id),
 });

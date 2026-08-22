@@ -71,6 +71,13 @@
       "when": 1787369541081,
       "tag": "0009_nebulous_absorbing_man",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1787372135171,
+      "tag": "0010_smart_bedlam",
+      "breakpoints": true
     }
   ]
 }

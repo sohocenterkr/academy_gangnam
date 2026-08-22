@@ -36,7 +36,22 @@ export default defineConfig({
         test: {
           name: 'server',
           include: ['server/**/*.{test,spec}.{ts,tsx}'],
+          exclude: ['server/routes/messagingSettings.test.ts', 'server/routes/messageDrafts.test.ts'],
           environment: 'node',
+        },
+      },
+      {
+        // Split out from 'server': these two suites both touch the single integration_settings
+        // row a real Pushbullet connection uses (one row per provider, unique constraint).
+        // Running them in parallel let them interleave and corrupt/delete that row — see
+        // server/testUtils/pushbulletIntegrationFixture.ts. fileParallelism: false forces them
+        // to run one at a time without slowing down the rest of the server suite.
+        extends: true,
+        test: {
+          name: 'server-pushbullet-singleton',
+          include: ['server/routes/messagingSettings.test.ts', 'server/routes/messageDrafts.test.ts'],
+          environment: 'node',
+          fileParallelism: false,
         },
       },
       {

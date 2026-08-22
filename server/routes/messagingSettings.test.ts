@@ -2,12 +2,18 @@ import { eq } from 'drizzle-orm';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import request from 'supertest';
 import { db } from '../db';
-import { admins, roles, auditLogs, authSessions, integrationSettings, messagingDevices } from '@shared/schema';
+import { admins, roles, auditLogs, authSessions } from '@shared/schema';
 import { hashPassword } from '../utils/password';
 import { SUPER_ADMIN_WILDCARD_PERMISSION } from '@shared/permissions';
 import { createFakeEmailAdapter } from '../services/email';
 import { createApp } from '../app';
 import type { PushbulletClient } from '../services/pushbullet';
+import {
+  clearPushbulletIntegration,
+  restorePushbulletIntegration,
+  snapshotPushbulletIntegration,
+  type PushbulletIntegrationSnapshot,
+} from '../testUtils/pushbulletIntegrationFixture';
 
 const SUPER_EMAIL = 'test-messaging-super@example.com';
 const PASSWORD = 'test-messaging-password-123';
@@ -48,36 +54,6 @@ async function loginAs(app: ReturnType<typeof createApp>, email: string): Promis
   return cookie;
 }
 
-// integration_settings has one row per provider (unique constraint), so this suite's own
-// connect/sync/disconnect calls operate on the *same* singleton row a real Pushbullet
-// connection would use. Snapshot whatever's there before the suite runs and restore it
-// exactly afterward, rather than unconditionally deleting — otherwise these tests would
-// wipe out a real admin's live connection (see incident: this happened once in dev).
-async function snapshotPushbulletIntegration() {
-  const integration = await db.query.integrationSettings.findFirst({ where: eq(integrationSettings.provider, 'pushbullet') });
-  if (!integration) return null;
-  const devices = await db.select().from(messagingDevices).where(eq(messagingDevices.integrationId, integration.id));
-  return { integration, devices };
-}
-
-async function clearPushbulletIntegration() {
-  const current = await db.query.integrationSettings.findFirst({ where: eq(integrationSettings.provider, 'pushbullet') });
-  if (current) {
-    await db.delete(messagingDevices).where(eq(messagingDevices.integrationId, current.id));
-    await db.delete(integrationSettings).where(eq(integrationSettings.id, current.id));
-  }
-}
-
-async function restorePushbulletIntegration(snapshot: Awaited<ReturnType<typeof snapshotPushbulletIntegration>>) {
-  await clearPushbulletIntegration();
-  if (snapshot) {
-    await db.insert(integrationSettings).values(snapshot.integration);
-    if (snapshot.devices.length > 0) {
-      await db.insert(messagingDevices).values(snapshot.devices);
-    }
-  }
-}
-
 async function cleanupAdminFixtures() {
   const adminToDelete = await db.query.admins.findFirst({ where: eq(admins.email, SUPER_EMAIL) });
   if (adminToDelete) {
@@ -89,7 +65,7 @@ async function cleanupAdminFixtures() {
 }
 
 describe('messaging settings routes', () => {
-  let preExistingIntegration: Awaited<ReturnType<typeof snapshotPushbulletIntegration>>;
+  let preExistingIntegration: PushbulletIntegrationSnapshot;
 
   beforeAll(async () => {
     preExistingIntegration = await snapshotPushbulletIntegration();

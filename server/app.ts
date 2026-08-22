@@ -21,6 +21,7 @@ import { createEnrollmentsRouter } from './routes/enrollments';
 import { createUploadsRouter } from './routes/uploads';
 import { createMessagingSettingsRouter } from './routes/messagingSettings';
 import { createMessageTemplatesRouter } from './routes/messageTemplates';
+import { createMessageDraftsRouter } from './routes/messageDrafts';
 import { createPlatformPresetsRouter } from './routes/platformPresets';
 import { createCardNewsRouter } from './routes/cardNews';
 import { loadEnv } from './env';
@@ -99,6 +100,7 @@ export function createApp(overrides: AppOverrides = {}): Express {
   }
 
   app.use('/api/message-templates', createMessageTemplatesRouter({ sessionSecret: env.AUTH_SESSION_SECRET }));
+  app.use('/api/message-drafts', createMessageDraftsRouter({ sessionSecret: env.AUTH_SESSION_SECRET }));
 
   const tokenEncryptionKey = overrides.pushbulletTokenEncryptionKey ?? env.PUSHBULLET_TOKEN_ENCRYPTION_KEY;
   if (overrides.pushbullet || tokenEncryptionKey) {
