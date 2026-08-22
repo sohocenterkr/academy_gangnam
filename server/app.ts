@@ -29,6 +29,8 @@ import { createCardNewsRouter } from './routes/cardNews';
 import { createDashboardRouter } from './routes/dashboard';
 import { createAuditLogsRouter } from './routes/auditLogs';
 import { createCronRouter } from './routes/cron';
+import { createReportsRouter } from './routes/reports';
+import { createExportsRouter } from './routes/exports';
 import { loadEnv } from './env';
 import { createResendEmailAdapter } from './services/email';
 import { createCloudinaryClient, type CloudinaryClient } from './services/cloudinary';
@@ -104,6 +106,10 @@ export function createApp(overrides: AppOverrides = {}): Express {
         uploadRoot: env.CLOUDINARY_UPLOAD_ROOT ?? '',
       })
     );
+    app.use(
+      '/api/exports',
+      createExportsRouter({ sessionSecret: env.AUTH_SESSION_SECRET, cloudinary, uploadRoot: env.CLOUDINARY_UPLOAD_ROOT ?? '' })
+    );
   }
 
   app.use('/api/message-templates', createMessageTemplatesRouter({ sessionSecret: env.AUTH_SESSION_SECRET }));
@@ -137,6 +143,7 @@ export function createApp(overrides: AppOverrides = {}): Express {
   app.use('/api/card-news', createCardNewsRouter({ sessionSecret: env.AUTH_SESSION_SECRET }));
   app.use('/api/dashboard', createDashboardRouter({ sessionSecret: env.AUTH_SESSION_SECRET }));
   app.use('/api/audit-logs', createAuditLogsRouter({ sessionSecret: env.AUTH_SESSION_SECRET }));
+  app.use('/api/reports', createReportsRouter({ sessionSecret: env.AUTH_SESSION_SECRET }));
 
   const cronSecret = overrides.cronSecret ?? env.CRON_SECRET;
   if (cronSecret) {

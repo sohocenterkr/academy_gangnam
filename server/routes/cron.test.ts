@@ -47,6 +47,9 @@ function fakeCloudinary(): CloudinaryClient {
     sign: () => 'fake-signature',
     getResource: async () => null,
     destroy: async () => {},
+    uploadBuffer: async () => {
+      throw new Error('uploadBuffer not used by cron routes tests');
+    },
   };
 }
 

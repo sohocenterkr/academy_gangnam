@@ -11,6 +11,12 @@ export interface CloudinaryClient {
   sign(params: Record<string, string | number>): string;
   getResource(publicId: string, resourceType: 'image' | 'video' | 'raw'): Promise<CloudinaryResource | null>;
   destroy(publicId: string, resourceType: 'image' | 'video' | 'raw'): Promise<void>;
+  /**
+   * Server-side upload for files the server itself generates (e.g. exported reports) — not
+   * a relay of a client-supplied upload, which spec §13.6 forbids. The buffer never came from
+   * an inbound request body here; it's produced fresh by this process.
+   */
+  uploadBuffer(buffer: Buffer, options: { folder: string; publicId: string; resourceType: 'raw' }): Promise<CloudinaryResource>;
 }
 
 export interface CloudinaryResource {
@@ -59,6 +65,38 @@ export function createCloudinaryClient(config: CloudinaryConfig): CloudinaryClie
     },
     async destroy(publicId, resourceType) {
       await instance.uploader.destroy(publicId, { resource_type: resourceType });
+    },
+    async uploadBuffer(buffer, options) {
+      const resource = await new Promise<{
+        public_id: string;
+        asset_id?: string;
+        secure_url: string;
+        format?: string;
+        bytes: number;
+      }>((resolve, reject) => {
+        const stream = instance.uploader.upload_stream(
+          { folder: options.folder, public_id: options.publicId, resource_type: options.resourceType },
+          (error, result) => {
+            if (error || !result) {
+              reject(error ?? new Error('Cloudinary upload returned no result'));
+              return;
+            }
+            resolve(result);
+          }
+        );
+        stream.end(buffer);
+      });
+      return {
+        publicId: resource.public_id,
+        assetId: resource.asset_id ?? null,
+        secureUrl: resource.secure_url,
+        resourceType: options.resourceType,
+        format: resource.format ?? null,
+        bytes: resource.bytes,
+        width: null,
+        height: null,
+        duration: null,
+      };
     },
   };
 }

@@ -128,6 +128,11 @@ export function AdminHomePage() {
             </Link>
           </li>
           <li>
+            <Link href="/admin/reports" className="text-blue-600 underline">
+              보고서
+            </Link>
+          </li>
+          <li>
             <Link href="/admin/audit-logs" className="text-blue-600 underline">
               감사 로그
             </Link>

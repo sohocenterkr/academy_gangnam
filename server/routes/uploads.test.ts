@@ -21,6 +21,9 @@ function createFakeCloudinaryClient(resources: Map<string, CloudinaryResource>):
       return resource;
     },
     destroy: async () => {},
+    uploadBuffer: async () => {
+      throw new Error('uploadBuffer not used by uploads routes tests');
+    },
   };
 }
 
