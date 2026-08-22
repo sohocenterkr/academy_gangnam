@@ -49,6 +49,16 @@ export function AdminHomePage() {
             </Link>
           </li>
           <li>
+            <Link href="/admin/messaging/settings" className="text-blue-600 underline">
+              문자 발송 설정
+            </Link>
+          </li>
+          <li>
+            <Link href="/admin/messaging/templates" className="text-blue-600 underline">
+              문자 템플릿
+            </Link>
+          </li>
+          <li>
             <Link href="/admin/profile" className="text-blue-600 underline">
               내 계정
             </Link>

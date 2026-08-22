@@ -14,6 +14,8 @@ import { AdminCheckInsPage } from './features/checkin/AdminCheckInsPage';
 import { InstructorListPage } from './features/instructors/InstructorListPage';
 import { CourseListPage } from './features/courses/CourseListPage';
 import { CourseDetailPage } from './features/courses/CourseDetailPage';
+import { MessagingSettingsPage } from './features/messaging/MessagingSettingsPage';
+import { MessageTemplatesPage } from './features/messaging/MessageTemplatesPage';
 import { ProtectedRoute } from './components/layout/ProtectedRoute';
 
 export function AppRoutes() {
@@ -80,6 +82,16 @@ export function AppRoutes() {
       <Route path="/admin/courses/:courseId">
         <ProtectedRoute>
           <CourseDetailPage />
+        </ProtectedRoute>
+      </Route>
+      <Route path="/admin/messaging/settings">
+        <ProtectedRoute>
+          <MessagingSettingsPage />
+        </ProtectedRoute>
+      </Route>
+      <Route path="/admin/messaging/templates">
+        <ProtectedRoute>
+          <MessageTemplatesPage />
         </ProtectedRoute>
       </Route>
     </Switch>
