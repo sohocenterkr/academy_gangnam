@@ -432,3 +432,64 @@ export const mediaAssets = pgTable(
     index('media_assets_status_expires_idx').on(table.status, table.expiresAt),
   ]
 );
+
+export const integrationSettings = pgTable(
+  'integration_settings',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    provider: text('provider', { enum: ['pushbullet', 'resend', 'cloudinary', 'ai_provider'] }).notNull(),
+    displayName: text('display_name').notNull(),
+    encryptedConfig: text('encrypted_config'),
+    status: text('status', { enum: ['connected', 'disconnected', 'error'] })
+      .notNull()
+      .default('disconnected'),
+    lastCheckedAt: timestamp('last_checked_at', { withTimezone: true }),
+    lastErrorCode: text('last_error_code'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+    createdBy: uuid('created_by').references(() => admins.id),
+    updatedBy: uuid('updated_by').references(() => admins.id),
+  },
+  (table) => [uniqueIndex('integration_settings_provider_unique').on(table.provider)]
+);
+
+export const messagingDevices = pgTable(
+  'messaging_devices',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    integrationId: uuid('integration_id')
+      .notNull()
+      .references(() => integrationSettings.id),
+    externalDeviceId: text('external_device_id').notNull(),
+    nickname: text('nickname').notNull(),
+    deviceType: text('device_type'),
+    isEnabled: boolean('is_enabled').notNull().default(true),
+    isDefault: boolean('is_default').notNull().default(false),
+    lastSeenAt: timestamp('last_seen_at', { withTimezone: true }),
+    lastErrorCode: text('last_error_code'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [uniqueIndex('messaging_devices_integration_external_unique').on(table.integrationId, table.externalDeviceId)]
+);
+
+export const messageTemplates = pgTable('message_templates', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  name: text('name').notNull(),
+  category: text('category'),
+  messageType: text('message_type', { enum: ['informational', 'marketing'] }).notNull(),
+  body: text('body').notNull(),
+  description: text('description'),
+  defaultMediaId: uuid('default_media_id').references(() => mediaAssets.id),
+  allowedRoles: jsonb('allowed_roles').$type<string[]>().notNull().default([]),
+  status: text('status', { enum: ['active', 'inactive'] })
+    .notNull()
+    .default('active'),
+  usageCount: integer('usage_count').notNull().default(0),
+  lastUsedAt: timestamp('last_used_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  deletedAt: timestamp('deleted_at', { withTimezone: true }),
+  createdBy: uuid('created_by').references(() => admins.id),
+  updatedBy: uuid('updated_by').references(() => admins.id),
+});

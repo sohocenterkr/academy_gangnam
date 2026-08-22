@@ -19,13 +19,18 @@ import { createCourseSchedulesRouter } from './routes/courseSchedules';
 import { createCourseExceptionsRouter } from './routes/courseExceptions';
 import { createEnrollmentsRouter } from './routes/enrollments';
 import { createUploadsRouter } from './routes/uploads';
+import { createMessagingSettingsRouter } from './routes/messagingSettings';
+import { createMessageTemplatesRouter } from './routes/messageTemplates';
 import { loadEnv } from './env';
 import { createResendEmailAdapter } from './services/email';
 import { createCloudinaryClient, type CloudinaryClient } from './services/cloudinary';
+import { createPushbulletClient, type PushbulletClient } from './services/pushbullet';
 
 export interface AppOverrides {
   emailAdapter?: import('./services/email').EmailAdapter;
   cloudinary?: CloudinaryClient;
+  pushbullet?: PushbulletClient;
+  pushbulletTokenEncryptionKey?: string;
 }
 
 export function createApp(overrides: AppOverrides = {}): Express {
@@ -87,6 +92,20 @@ export function createApp(overrides: AppOverrides = {}): Express {
         cloudName: env.CLOUDINARY_CLOUD_NAME ?? '',
         apiKey: env.CLOUDINARY_API_KEY ?? '',
         uploadRoot: env.CLOUDINARY_UPLOAD_ROOT ?? '',
+      })
+    );
+  }
+
+  app.use('/api/message-templates', createMessageTemplatesRouter({ sessionSecret: env.AUTH_SESSION_SECRET }));
+
+  const tokenEncryptionKey = overrides.pushbulletTokenEncryptionKey ?? env.PUSHBULLET_TOKEN_ENCRYPTION_KEY;
+  if (overrides.pushbullet || tokenEncryptionKey) {
+    app.use(
+      '/api/messaging',
+      createMessagingSettingsRouter({
+        sessionSecret: env.AUTH_SESSION_SECRET,
+        pushbullet: overrides.pushbullet ?? createPushbulletClient(),
+        tokenEncryptionKey: tokenEncryptionKey ?? '',
       })
     );
   }

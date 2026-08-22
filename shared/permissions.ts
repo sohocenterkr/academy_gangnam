@@ -7,6 +7,7 @@ export const PERMISSIONS = {
   CHECKINS_MANAGE: 'checkins:manage',
   COURSES_MANAGE: 'courses:manage',
   MEDIA_MANAGE: 'media:manage',
+  MESSAGING_MANAGE: 'messaging:manage',
 } as const;
 
 export type Permission = (typeof PERMISSIONS)[keyof typeof PERMISSIONS];
