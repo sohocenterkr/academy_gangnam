@@ -41,6 +41,9 @@ describe('AdminCheckInsPage', () => {
     const fetchMock = vi.fn();
     fetchMock.mockImplementation((path: string, init?: RequestInit) => {
       if (path === '/api/check-ins' && (!init || init.method === undefined)) return Promise.resolve(jsonResponse([]));
+      if (path === '/api/students?search=%EA%B9%80' && (!init || init.method === undefined)) {
+        return Promise.resolve(jsonResponse([{ id: 's9', name: '김*수', phoneNormalized: '010-****-1234' }]));
+      }
       if (path === '/api/check-ins/manual' && init?.method === 'POST') {
         return Promise.resolve(
           jsonResponse({
@@ -61,7 +64,10 @@ describe('AdminCheckInsPage', () => {
 
     render(<AdminCheckInsPage />);
 
-    fireEvent.change(screen.getByLabelText('학생 ID'), { target: { value: 's9' } });
+    fireEvent.change(screen.getByLabelText('학생 검색'), { target: { value: '김' } });
+    fireEvent.click(screen.getByRole('button', { name: '검색' }));
+    fireEvent.click(await screen.findByRole('button', { name: /김\*수/ }));
+
     fireEvent.change(screen.getByLabelText('사유'), { target: { value: '오후 보강 재등원' } });
     fireEvent.click(screen.getByLabelText('예외 등원 허용 (이미 등원 기록이 있어도 추가 등록)'));
     fireEvent.click(screen.getByRole('button', { name: '수동 등원 등록' }));
