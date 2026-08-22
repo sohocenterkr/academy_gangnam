@@ -5,6 +5,7 @@ import { LoginPage } from './features/auth/LoginPage';
 import { ProfilePage } from './features/settings/ProfilePage';
 import { AcademySettingsPage } from './features/settings/AcademySettingsPage';
 import { AcademicsSettingsPage } from './features/settings/AcademicsSettingsPage';
+import { AuditLogsPage } from './features/settings/AuditLogsPage';
 import { GuardianListPage } from './features/guardians/GuardianListPage';
 import { GuardianDetailPage } from './features/guardians/GuardianDetailPage';
 import { StudentListPage } from './features/students/StudentListPage';
@@ -48,6 +49,11 @@ export function AppRoutes() {
       <Route path="/admin/settings/academics">
         <ProtectedRoute>
           <AcademicsSettingsPage />
+        </ProtectedRoute>
+      </Route>
+      <Route path="/admin/audit-logs">
+        <ProtectedRoute>
+          <AuditLogsPage />
         </ProtectedRoute>
       </Route>
       <Route path="/admin/guardians">

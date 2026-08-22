@@ -26,6 +26,8 @@ import { createMessageCampaignsRouter, createMessageUsageRouter } from './routes
 import { createPushbulletSmsClient, type PushbulletSmsClient } from './services/pushbulletSms';
 import { createPlatformPresetsRouter } from './routes/platformPresets';
 import { createCardNewsRouter } from './routes/cardNews';
+import { createDashboardRouter } from './routes/dashboard';
+import { createAuditLogsRouter } from './routes/auditLogs';
 import { loadEnv } from './env';
 import { createResendEmailAdapter } from './services/email';
 import { createCloudinaryClient, type CloudinaryClient } from './services/cloudinary';
@@ -131,6 +133,8 @@ export function createApp(overrides: AppOverrides = {}): Express {
 
   app.use('/api/platform-presets', createPlatformPresetsRouter({ sessionSecret: env.AUTH_SESSION_SECRET }));
   app.use('/api/card-news', createCardNewsRouter({ sessionSecret: env.AUTH_SESSION_SECRET }));
+  app.use('/api/dashboard', createDashboardRouter({ sessionSecret: env.AUTH_SESSION_SECRET }));
+  app.use('/api/audit-logs', createAuditLogsRouter({ sessionSecret: env.AUTH_SESSION_SECRET }));
 
   app.use('/api', healthRouter);
   app.use('/api', (req, res) => {

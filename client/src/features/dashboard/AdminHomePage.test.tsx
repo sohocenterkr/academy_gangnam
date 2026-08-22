@@ -55,6 +55,7 @@ describe('AdminHomePage', () => {
     expect(screen.getByRole('link', { name: '문자 발송 현황' })).toHaveAttribute('href', '/admin/messaging/campaigns');
     expect(screen.getByRole('link', { name: '카드뉴스' })).toHaveAttribute('href', '/admin/card-news');
     expect(screen.getByRole('link', { name: '카드뉴스 플랫폼 프리셋' })).toHaveAttribute('href', '/admin/card-news/presets');
+    expect(screen.getByRole('link', { name: '감사 로그' })).toHaveAttribute('href', '/admin/audit-logs');
     expect(screen.getByRole('link', { name: '내 계정' })).toHaveAttribute('href', '/admin/profile');
   });
 });
