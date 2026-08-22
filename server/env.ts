@@ -11,7 +11,15 @@ const envSchema = z.object({
   INITIAL_ADMIN_NAME: z.string().min(1),
   RESEND_API_KEY: z.string().min(1),
   RESEND_FROM_EMAIL: z.string().email(),
+  CLOUDINARY_CLOUD_NAME: emptyToUndefined(z.string().min(1).optional()),
+  CLOUDINARY_API_KEY: emptyToUndefined(z.string().min(1).optional()),
+  CLOUDINARY_API_SECRET: emptyToUndefined(z.string().min(1).optional()),
+  CLOUDINARY_UPLOAD_ROOT: emptyToUndefined(z.string().min(1).optional()),
 });
+
+function emptyToUndefined<T extends z.ZodTypeAny>(schema: T) {
+  return z.preprocess((value) => (value === '' ? undefined : value), schema);
+}
 
 export type Env = z.infer<typeof envSchema>;
 

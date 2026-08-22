@@ -6,6 +6,7 @@ export const PERMISSIONS = {
   STUDENTS_MANAGE: 'students:manage',
   CHECKINS_MANAGE: 'checkins:manage',
   COURSES_MANAGE: 'courses:manage',
+  MEDIA_MANAGE: 'media:manage',
 } as const;
 
 export type Permission = (typeof PERMISSIONS)[keyof typeof PERMISSIONS];

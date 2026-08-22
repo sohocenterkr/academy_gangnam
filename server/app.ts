@@ -18,11 +18,14 @@ import { createCoursesRouter } from './routes/courses';
 import { createCourseSchedulesRouter } from './routes/courseSchedules';
 import { createCourseExceptionsRouter } from './routes/courseExceptions';
 import { createEnrollmentsRouter } from './routes/enrollments';
+import { createUploadsRouter } from './routes/uploads';
 import { loadEnv } from './env';
 import { createResendEmailAdapter } from './services/email';
+import { createCloudinaryClient, type CloudinaryClient } from './services/cloudinary';
 
 export interface AppOverrides {
   emailAdapter?: import('./services/email').EmailAdapter;
+  cloudinary?: CloudinaryClient;
 }
 
 export function createApp(overrides: AppOverrides = {}): Express {
@@ -64,6 +67,30 @@ export function createApp(overrides: AppOverrides = {}): Express {
   app.use('/api', createCourseSchedulesRouter({ sessionSecret: env.AUTH_SESSION_SECRET }));
   app.use('/api', createCourseExceptionsRouter({ sessionSecret: env.AUTH_SESSION_SECRET }));
   app.use('/api/enrollments', createEnrollmentsRouter({ sessionSecret: env.AUTH_SESSION_SECRET }));
+
+  const cloudinaryConfigured =
+    env.CLOUDINARY_CLOUD_NAME && env.CLOUDINARY_API_KEY && env.CLOUDINARY_API_SECRET && env.CLOUDINARY_UPLOAD_ROOT;
+  if (overrides.cloudinary || cloudinaryConfigured) {
+    const cloudinary =
+      overrides.cloudinary ??
+      createCloudinaryClient({
+        cloudName: env.CLOUDINARY_CLOUD_NAME!,
+        apiKey: env.CLOUDINARY_API_KEY!,
+        apiSecret: env.CLOUDINARY_API_SECRET!,
+        uploadRoot: env.CLOUDINARY_UPLOAD_ROOT!,
+      });
+    app.use(
+      '/api/uploads',
+      createUploadsRouter({
+        sessionSecret: env.AUTH_SESSION_SECRET,
+        cloudinary,
+        cloudName: env.CLOUDINARY_CLOUD_NAME ?? '',
+        apiKey: env.CLOUDINARY_API_KEY ?? '',
+        uploadRoot: env.CLOUDINARY_UPLOAD_ROOT ?? '',
+      })
+    );
+  }
+
   app.use('/api', healthRouter);
   app.use('/api', (req, res) => {
     res.status(404).json({

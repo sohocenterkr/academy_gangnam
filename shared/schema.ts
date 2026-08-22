@@ -371,3 +371,64 @@ export const enrollments = pgTable(
     index('enrollments_course_status_start_idx').on(table.courseId, table.status, table.startDate),
   ]
 );
+
+export const uploadSessions = pgTable(
+  'upload_sessions',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    ownerAdminId: uuid('owner_admin_id')
+      .notNull()
+      .references(() => admins.id),
+    purpose: text('purpose').notNull(),
+    targetType: text('target_type').notNull(),
+    targetId: uuid('target_id'),
+    expectedResourceType: text('expected_resource_type', { enum: ['image', 'video', 'raw'] }).notNull(),
+    expectedFolder: text('expected_folder').notNull(),
+    expectedBytes: integer('expected_bytes'),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    status: text('status', { enum: ['pending', 'completed', 'expired', 'rejected'] })
+      .notNull()
+      .default('pending'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    completedAt: timestamp('completed_at', { withTimezone: true }),
+  },
+  (table) => [
+    index('upload_sessions_owner_status_idx').on(table.ownerAdminId, table.status),
+    index('upload_sessions_status_expires_idx').on(table.status, table.expiresAt),
+  ]
+);
+
+export const mediaAssets = pgTable(
+  'media_assets',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    ownerAdminId: uuid('owner_admin_id')
+      .notNull()
+      .references(() => admins.id),
+    purpose: text('purpose').notNull(),
+    targetType: text('target_type').notNull(),
+    targetId: uuid('target_id'),
+    cloudinaryPublicId: text('cloudinary_public_id').notNull(),
+    cloudinaryAssetId: text('cloudinary_asset_id'),
+    secureUrl: text('secure_url').notNull(),
+    resourceType: text('resource_type', { enum: ['image', 'video', 'raw'] }).notNull(),
+    format: text('format'),
+    mimeType: text('mime_type'),
+    bytes: integer('bytes').notNull(),
+    width: integer('width'),
+    height: integer('height'),
+    duration: integer('duration'),
+    status: text('status', { enum: ['active', 'pending_delete', 'deleted', 'orphan_review', 'error'] })
+      .notNull()
+      .default('active'),
+    expiresAt: timestamp('expires_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
+    deletedBy: uuid('deleted_by').references(() => admins.id),
+  },
+  (table) => [
+    uniqueIndex('media_assets_public_id_resource_type_unique').on(table.cloudinaryPublicId, table.resourceType),
+    index('media_assets_target_idx').on(table.targetType, table.targetId),
+    index('media_assets_status_expires_idx').on(table.status, table.expiresAt),
+  ]
+);
