@@ -34,4 +34,30 @@ describe('AuditLogsPage', () => {
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/audit-logs?targetType=student', expect.anything()));
   });
+
+  it('expands an entry to show its before/after detail', async () => {
+    const entries = [
+      { id: 'a1', adminId: 'admin1', roleSnapshot: '최고관리자', action: 'student.update', targetType: 'student', targetId: 's1', result: 'success', createdAt: '2026-08-22T00:00:00Z' },
+    ];
+    const fetchMock = vi.fn();
+    fetchMock.mockImplementation((path: string) => {
+      if (path === '/api/audit-logs') return Promise.resolve(jsonResponse(entries));
+      if (path === '/api/audit-logs/a1') {
+        return Promise.resolve(
+          jsonResponse({ ...entries[0], beforeDataSafe: { name: '이전이름' }, afterDataSafe: { name: '새이름' }, requestId: 'req' })
+        );
+      }
+      throw new Error(`unexpected fetch: ${path}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<AuditLogsPage />);
+    await screen.findByText('student.update');
+
+    fireEvent.click(screen.getByText('student.update'));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/audit-logs/a1', expect.anything()));
+    await screen.findByText(/이전이름/);
+    await screen.findByText(/새이름/);
+  });
 });
