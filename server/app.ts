@@ -21,6 +21,8 @@ import { createEnrollmentsRouter } from './routes/enrollments';
 import { createUploadsRouter } from './routes/uploads';
 import { createMessagingSettingsRouter } from './routes/messagingSettings';
 import { createMessageTemplatesRouter } from './routes/messageTemplates';
+import { createPlatformPresetsRouter } from './routes/platformPresets';
+import { createCardNewsRouter } from './routes/cardNews';
 import { loadEnv } from './env';
 import { createResendEmailAdapter } from './services/email';
 import { createCloudinaryClient, type CloudinaryClient } from './services/cloudinary';
@@ -109,6 +111,9 @@ export function createApp(overrides: AppOverrides = {}): Express {
       })
     );
   }
+
+  app.use('/api/platform-presets', createPlatformPresetsRouter({ sessionSecret: env.AUTH_SESSION_SECRET }));
+  app.use('/api/card-news', createCardNewsRouter({ sessionSecret: env.AUTH_SESSION_SECRET }));
 
   app.use('/api', healthRouter);
   app.use('/api', (req, res) => {

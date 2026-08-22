@@ -26,3 +26,22 @@ export function isUniqueViolation(error: unknown, indexName: string): boolean {
   }
   return false;
 }
+
+/**
+ * Same `.cause`-walking approach as isUniqueViolation, but checking for Postgres error code
+ * 23503 (foreign_key_violation) instead of a constraint name — used to turn "still referenced
+ * by other rows" into a friendly IN_USE response instead of a 500.
+ */
+export function isForeignKeyViolation(error: unknown): boolean {
+  let current: unknown = error;
+  while (current) {
+    if (current instanceof Error) {
+      const code = (current as { code?: unknown }).code;
+      if (code === '23503') return true;
+      current = current.cause;
+      continue;
+    }
+    break;
+  }
+  return false;
+}

@@ -51,6 +51,8 @@ describe('AdminHomePage', () => {
     expect(screen.getByRole('link', { name: '강좌 관리' })).toHaveAttribute('href', '/admin/courses');
     expect(screen.getByRole('link', { name: '문자 발송 설정' })).toHaveAttribute('href', '/admin/messaging/settings');
     expect(screen.getByRole('link', { name: '문자 템플릿' })).toHaveAttribute('href', '/admin/messaging/templates');
+    expect(screen.getByRole('link', { name: '카드뉴스' })).toHaveAttribute('href', '/admin/card-news');
+    expect(screen.getByRole('link', { name: '카드뉴스 플랫폼 프리셋' })).toHaveAttribute('href', '/admin/card-news/presets');
     expect(screen.getByRole('link', { name: '내 계정' })).toHaveAttribute('href', '/admin/profile');
   });
 });

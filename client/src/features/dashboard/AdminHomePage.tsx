@@ -59,6 +59,16 @@ export function AdminHomePage() {
             </Link>
           </li>
           <li>
+            <Link href="/admin/card-news" className="text-blue-600 underline">
+              카드뉴스
+            </Link>
+          </li>
+          <li>
+            <Link href="/admin/card-news/presets" className="text-blue-600 underline">
+              카드뉴스 플랫폼 프리셋
+            </Link>
+          </li>
+          <li>
             <Link href="/admin/profile" className="text-blue-600 underline">
               내 계정
             </Link>

@@ -16,6 +16,9 @@ import { CourseListPage } from './features/courses/CourseListPage';
 import { CourseDetailPage } from './features/courses/CourseDetailPage';
 import { MessagingSettingsPage } from './features/messaging/MessagingSettingsPage';
 import { MessageTemplatesPage } from './features/messaging/MessageTemplatesPage';
+import { PlatformPresetsPage } from './features/cardNews/PlatformPresetsPage';
+import { CardNewsListPage } from './features/cardNews/CardNewsListPage';
+import { CardNewsDetailPage } from './features/cardNews/CardNewsDetailPage';
 import { ProtectedRoute } from './components/layout/ProtectedRoute';
 
 export function AppRoutes() {
@@ -92,6 +95,21 @@ export function AppRoutes() {
       <Route path="/admin/messaging/templates">
         <ProtectedRoute>
           <MessageTemplatesPage />
+        </ProtectedRoute>
+      </Route>
+      <Route path="/admin/card-news/presets">
+        <ProtectedRoute>
+          <PlatformPresetsPage />
+        </ProtectedRoute>
+      </Route>
+      <Route path="/admin/card-news/:projectId">
+        <ProtectedRoute>
+          <CardNewsDetailPage />
+        </ProtectedRoute>
+      </Route>
+      <Route path="/admin/card-news">
+        <ProtectedRoute>
+          <CardNewsListPage />
         </ProtectedRoute>
       </Route>
     </Switch>

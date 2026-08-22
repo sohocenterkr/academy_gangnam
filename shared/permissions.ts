@@ -8,6 +8,7 @@ export const PERMISSIONS = {
   COURSES_MANAGE: 'courses:manage',
   MEDIA_MANAGE: 'media:manage',
   MESSAGING_MANAGE: 'messaging:manage',
+  CARD_NEWS_MANAGE: 'cardNews:manage',
 } as const;
 
 export type Permission = (typeof PERMISSIONS)[keyof typeof PERMISSIONS];

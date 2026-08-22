@@ -493,3 +493,115 @@ export const messageTemplates = pgTable('message_templates', {
   createdBy: uuid('created_by').references(() => admins.id),
   updatedBy: uuid('updated_by').references(() => admins.id),
 });
+
+export const platformPresets = pgTable('platform_presets', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  platform: text('platform').notNull(),
+  postType: text('post_type').notNull(),
+  name: text('name').notNull(),
+  widthPx: integer('width_px').notNull(),
+  heightPx: integer('height_px').notNull(),
+  safeArea: jsonb('safe_area').$type<{ top: number; right: number; bottom: number; left: number }>(),
+  isActive: boolean('is_active').notNull().default(true),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  createdBy: uuid('created_by').references(() => admins.id),
+  updatedBy: uuid('updated_by').references(() => admins.id),
+});
+
+export const cardNewsProjects = pgTable('card_news_projects', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  name: text('name').notNull(),
+  presetId: uuid('preset_id')
+    .notNull()
+    .references(() => platformPresets.id),
+  title: text('title'),
+  story: text('story'),
+  eventDate: date('event_date'),
+  relatedCourseId: uuid('related_course_id').references(() => courses.id),
+  relatedStudentId: uuid('related_student_id').references(() => students.id),
+  studentNameDisplayMode: text('student_name_display_mode', { enum: ['full', 'masked', 'hidden'] })
+    .notNull()
+    .default('masked'),
+  hashtags: jsonb('hashtags').$type<string[]>().notNull().default([]),
+  showAcademyInfo: boolean('show_academy_info').notNull().default(true),
+  aiProvider: text('ai_provider'),
+  aiModel: text('ai_model'),
+  sendPhotosToAi: boolean('send_photos_to_ai').notNull().default(false),
+  privacyConfirmedBy: uuid('privacy_confirmed_by').references(() => admins.id),
+  privacyConfirmedAt: timestamp('privacy_confirmed_at', { withTimezone: true }),
+  estimatedCost: integer('estimated_cost'),
+  actualUsage: jsonb('actual_usage'),
+  status: text('status', {
+    enum: ['draft', 'uploading', 'generating', 'editing', 'rendering', 'ready', 'partial_error', 'expired', 'deleted'],
+  })
+    .notNull()
+    .default('draft'),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  deletedAt: timestamp('deleted_at', { withTimezone: true }),
+  createdBy: uuid('created_by').references(() => admins.id),
+  updatedBy: uuid('updated_by').references(() => admins.id),
+});
+
+export const cardNewsCards = pgTable(
+  'card_news_cards',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    projectId: uuid('project_id')
+      .notNull()
+      .references(() => cardNewsProjects.id),
+    sortOrder: integer('sort_order').notNull().default(0),
+    layoutJson: jsonb('layout_json'),
+    title: text('title'),
+    body: text('body'),
+    renderedMediaId: uuid('rendered_media_id').references(() => mediaAssets.id),
+    status: text('status', { enum: ['draft', 'ready'] })
+      .notNull()
+      .default('draft'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+    createdBy: uuid('created_by').references(() => admins.id),
+    updatedBy: uuid('updated_by').references(() => admins.id),
+  },
+  (table) => [index('card_news_cards_project_sort_idx').on(table.projectId, table.sortOrder)]
+);
+
+export const cardNewsMedia = pgTable(
+  'card_news_media',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    projectId: uuid('project_id')
+      .notNull()
+      .references(() => cardNewsProjects.id),
+    cardId: uuid('card_id').references(() => cardNewsCards.id),
+    mediaId: uuid('media_id')
+      .notNull()
+      .references(() => mediaAssets.id),
+    role: text('role', { enum: ['source', 'background', 'logo', 'output'] }).notNull(),
+    sortOrder: integer('sort_order').notNull().default(0),
+  },
+  (table) => [index('card_news_media_project_idx').on(table.projectId)]
+);
+
+export const aiGenerationLogs = pgTable('ai_generation_logs', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  projectId: uuid('project_id')
+    .notNull()
+    .references(() => cardNewsProjects.id),
+  provider: text('provider').notNull(),
+  model: text('model').notNull(),
+  photosSent: integer('photos_sent').notNull().default(0),
+  inputSummarySafe: text('input_summary_safe'),
+  outputJson: jsonb('output_json'),
+  usageJson: jsonb('usage_json'),
+  estimatedCost: integer('estimated_cost'),
+  actualCost: integer('actual_cost'),
+  status: text('status', { enum: ['pending', 'success', 'failed'] })
+    .notNull()
+    .default('pending'),
+  errorCode: text('error_code'),
+  createdBy: uuid('created_by').references(() => admins.id),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
