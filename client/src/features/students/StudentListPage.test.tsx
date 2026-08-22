@@ -85,4 +85,32 @@ describe('StudentListPage', () => {
 
     await waitFor(() => expect(screen.queryByText(/이미 등록된 전화번호/)).not.toBeInTheDocument());
   });
+
+  it('uploads an Excel file and shows the import result', async () => {
+    const fetchMock = vi.fn();
+    fetchMock.mockImplementation((path: string, init?: RequestInit) => {
+      if (path === '/api/grade-levels') return Promise.resolve(jsonResponse([]));
+      if (path === '/api/schools') return Promise.resolve(jsonResponse([]));
+      if (path.startsWith('/api/students') && (!init || init.method === undefined)) return Promise.resolve(jsonResponse([]));
+      if (path === '/api/students/import' && init?.method === 'POST') {
+        const body = JSON.parse(init.body as string) as { fileBase64: string };
+        expect(body.fileBase64).toBe('ZmFrZS14bHN4LWJ5dGVz');
+        return Promise.resolve(jsonResponse({ createdCount: 2, errors: [{ row: 4, reason: '학년을 찾을 수 없습니다: 없는학년' }] }));
+      }
+      throw new Error(`unexpected fetch: ${path} ${init?.method ?? 'GET'}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<StudentListPage />);
+    await screen.findByText('학생 관리');
+
+    const file = new File([Uint8Array.from(atob('ZmFrZS14bHN4LWJ5dGVz'), (c) => c.charCodeAt(0))], 'students.xlsx', {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    });
+    const input = screen.getByText('엑셀 업로드(.xlsx)').closest('label')!.querySelector('input')!;
+    fireEvent.change(input, { target: { files: [file] } });
+
+    await waitFor(() => expect(screen.getByText(/2명 등록됨/)).toBeInTheDocument());
+    expect(screen.getByText(/4행: 학년을 찾을 수 없습니다/)).toBeInTheDocument();
+  });
 });

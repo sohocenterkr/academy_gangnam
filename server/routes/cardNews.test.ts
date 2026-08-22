@@ -2,11 +2,35 @@ import { eq } from 'drizzle-orm';
 import { afterEach, describe, expect, it } from 'vitest';
 import request from 'supertest';
 import { db } from '../db';
-import { admins, roles, auditLogs, authSessions, platformPresets, cardNewsProjects, cardNewsMedia, mediaAssets } from '@shared/schema';
+import {
+  admins,
+  roles,
+  auditLogs,
+  authSessions,
+  platformPresets,
+  cardNewsProjects,
+  cardNewsMedia,
+  cardNewsCards,
+  aiGenerationLogs,
+  mediaAssets,
+} from '@shared/schema';
 import { hashPassword } from '../utils/password';
 import { SUPER_ADMIN_WILDCARD_PERMISSION } from '@shared/permissions';
 import { createFakeEmailAdapter } from '../services/email';
 import { createApp } from '../app';
+import type { OpenAIClient } from '../services/openaiCardNews';
+
+function fakeOpenAI(): OpenAIClient {
+  return {
+    generateCardNewsCopy: async (input) => ({
+      cards: Array.from({ length: input.cardCount }, (_, i) => ({ title: `카드 제목 ${i + 1}`, body: `카드 본문 ${i + 1}` })),
+      model: 'gpt-4o-mini',
+      promptTokens: 300,
+      completionTokens: 150,
+      estimatedCostUsd: 0.0001,
+    }),
+  };
+}
 
 const SUPER_EMAIL = 'test-cardnews-super@example.com';
 const PASSWORD = 'test-cardnews-password-123';
@@ -60,6 +84,8 @@ async function loginAs(app: ReturnType<typeof createApp>, email: string): Promis
 async function cleanup() {
   const projects = await db.select({ id: cardNewsProjects.id }).from(cardNewsProjects).where(eq(cardNewsProjects.name, PROJECT_NAME));
   for (const project of projects) {
+    await db.delete(aiGenerationLogs).where(eq(aiGenerationLogs.projectId, project.id));
+    await db.delete(cardNewsCards).where(eq(cardNewsCards.projectId, project.id));
     await db.delete(cardNewsMedia).where(eq(cardNewsMedia.projectId, project.id));
     await db.delete(cardNewsProjects).where(eq(cardNewsProjects.id, project.id));
   }
@@ -128,5 +154,40 @@ describe('card news routes', () => {
 
     const afterDelete = await request(app).get(`/api/card-news/${created.body.data.id}`).set('Cookie', cookie);
     expect(afterDelete.status).toBe(404);
+  });
+
+  it('rejects generate when AI is not configured, then generates cards and lets the admin edit them', async () => {
+    const { presetId } = await seedFixtures();
+    const noAiApp = createApp({ emailAdapter: createFakeEmailAdapter() });
+    const noAiCookie = await loginAs(noAiApp, SUPER_EMAIL);
+    const created = await request(noAiApp).post('/api/card-news').set('Cookie', noAiCookie).send({ name: PROJECT_NAME, presetId });
+
+    const unconfigured = await request(noAiApp).post(`/api/card-news/${created.body.data.id}/generate`).set('Cookie', noAiCookie).send({ cardCount: 2 });
+    expect(unconfigured.status).toBe(503);
+
+    const app = createApp({ emailAdapter: createFakeEmailAdapter(), openai: fakeOpenAI() });
+    const cookie = await loginAs(app, SUPER_EMAIL);
+
+    const estimate = await request(app).post(`/api/card-news/${created.body.data.id}/cost-estimate`).set('Cookie', cookie).send({ cardCount: 2 });
+    expect(estimate.status).toBe(200);
+    expect(estimate.body.data.estimatedCostUsd).toBeGreaterThan(0);
+
+    const generated = await request(app).post(`/api/card-news/${created.body.data.id}/generate`).set('Cookie', cookie).send({ cardCount: 2 });
+    expect(generated.status).toBe(200);
+    expect(generated.body.data.cards).toHaveLength(2);
+    expect(generated.body.data.cards[0].title).toBe('카드 제목 1');
+
+    const afterGenerate = await request(app).get(`/api/card-news/${created.body.data.id}`).set('Cookie', cookie);
+    expect(afterGenerate.body.data.status).toBe('editing');
+    expect(afterGenerate.body.data.cards).toHaveLength(2);
+
+    const edited = await request(app)
+      .put(`/api/card-news/${created.body.data.id}/cards`)
+      .set('Cookie', cookie)
+      .send({ cards: [{ title: '수정된 제목', body: '수정된 본문' }] });
+    expect(edited.status).toBe(200);
+    expect(edited.body.data).toHaveLength(1);
+    expect(edited.body.data[0].title).toBe('수정된 제목');
+    expect(edited.body.data[0].status).toBe('ready');
   });
 });

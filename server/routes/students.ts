@@ -1,4 +1,5 @@
 import { and, eq, ilike, isNull, ne, or } from 'drizzle-orm';
+import ExcelJS from 'exceljs';
 import { Router } from 'express';
 import { z } from 'zod';
 import { getNowKSTISOString, getTodayKST } from '@shared/kst';
@@ -6,7 +7,7 @@ import { PERMISSIONS } from '@shared/permissions';
 import { maskName } from '@shared/masking';
 import { maskPhone, normalizePhone } from '@shared/phone';
 import { db } from '../db';
-import { students, studentGuardians, guardians, studentCheckinPhones, enrollments } from '@shared/schema';
+import { students, studentGuardians, guardians, studentCheckinPhones, enrollments, gradeLevels, schools } from '@shared/schema';
 import { parseBody } from '../utils/validate';
 import { createRequireAuth } from '../middleware/auth';
 import { createRequirePermission } from '../middleware/permissions';
@@ -54,6 +55,12 @@ const statusChangeSchema = z.object({
   effectiveDate: z.iso.date().optional(),
   reason: z.string().optional(),
 });
+
+const importSchema = z.object({
+  fileBase64: z.string().min(1),
+});
+
+const IMPORT_COLUMNS = ['이름', '전화번호', '학년', '학교', '보호자이름', '보호자전화번호'] as const;
 
 const linkGuardianSchema = z.object({
   guardianId: z.string().min(1),
@@ -227,6 +234,172 @@ export function createStudentsRouter(deps: StudentsRouterDeps): Router {
 
     res.json({
       data: { status: 'created', student: created },
+      meta: { requestId: req.requestId, kstTimestamp: getNowKSTISOString() },
+    });
+  });
+
+  router.get('/import-template', requireAuth, requireStudentsManage, async (req, res) => {
+    const workbook = new ExcelJS.Workbook();
+    const sheet = workbook.addWorksheet('학생명단');
+    sheet.columns = IMPORT_COLUMNS.map((header) => ({ header, key: header }));
+    sheet.addRow({
+      이름: '홍길동',
+      전화번호: '01012345678',
+      학년: '초등 3학년',
+      학교: '',
+      보호자이름: '',
+      보호자전화번호: '',
+    });
+    const buffer = await workbook.xlsx.writeBuffer();
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', 'attachment; filename="student-import-template.xlsx"');
+    res.send(Buffer.from(buffer));
+  });
+
+  router.post('/import', requireAuth, requireStudentsManage, async (req, res) => {
+    const parsed = parseBody(importSchema, req.body, res, req.requestId);
+    if (!parsed) return;
+
+    let buffer: Buffer;
+    try {
+      buffer = Buffer.from(parsed.fileBase64, 'base64');
+    } catch {
+      res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: '파일을 읽을 수 없습니다.', requestId: req.requestId } });
+      return;
+    }
+
+    const workbook = new ExcelJS.Workbook();
+    try {
+      // exceljs bundles its own @types/node Buffer typing that doesn't structurally match this
+      // project's — a real Buffer works fine at runtime, so this cast just satisfies tsc.
+      await workbook.xlsx.load(buffer as unknown as Parameters<typeof workbook.xlsx.load>[0]);
+    } catch {
+      res.status(400).json({
+        error: { code: 'VALIDATION_ERROR', message: '엑셀(.xlsx) 파일만 업로드할 수 있습니다.', requestId: req.requestId },
+      });
+      return;
+    }
+    const sheet = workbook.worksheets[0];
+    if (!sheet) {
+      res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: '시트를 찾을 수 없습니다.', requestId: req.requestId } });
+      return;
+    }
+
+    const [gradeList, schoolList, existingStudents] = await Promise.all([
+      db.select().from(gradeLevels),
+      db.select().from(schools),
+      db.select({ id: students.id, phoneNormalized: students.phoneNormalized }).from(students).where(isNull(students.deletedAt)),
+    ]);
+    const gradeByName = new Map(gradeList.map((g) => [g.name.trim(), g.id]));
+    const schoolByName = new Map(schoolList.map((s) => [s.name.trim(), s.id]));
+    const existingPhones = new Set(existingStudents.map((s) => s.phoneNormalized));
+
+    const created: string[] = [];
+    const errors: Array<{ row: number; reason: string }> = [];
+    const now = new Date();
+
+    for (let rowNumber = 2; rowNumber <= sheet.rowCount; rowNumber++) {
+      const row = sheet.getRow(rowNumber);
+      const name = String(row.getCell(1).value ?? '').trim();
+      const rawPhone = String(row.getCell(2).value ?? '').trim();
+      const gradeName = String(row.getCell(3).value ?? '').trim();
+      const schoolName = String(row.getCell(4).value ?? '').trim();
+      const guardianName = String(row.getCell(5).value ?? '').trim();
+      const guardianRawPhone = String(row.getCell(6).value ?? '').trim();
+
+      if (!name && !rawPhone && !gradeName) continue; // blank row
+
+      if (!name) {
+        errors.push({ row: rowNumber, reason: '이름이 비어 있습니다.' });
+        continue;
+      }
+      const phoneNormalized = normalizePhone(rawPhone);
+      if (!phoneNormalized) {
+        errors.push({ row: rowNumber, reason: '전화번호를 확인해 주세요.' });
+        continue;
+      }
+      const gradeLevelId = gradeByName.get(gradeName);
+      if (!gradeLevelId) {
+        errors.push({ row: rowNumber, reason: `학년을 찾을 수 없습니다: ${gradeName}` });
+        continue;
+      }
+      if (existingPhones.has(phoneNormalized)) {
+        errors.push({ row: rowNumber, reason: '이미 등록된 전화번호입니다.' });
+        continue;
+      }
+
+      const schoolId = schoolName ? schoolByName.get(schoolName) : undefined;
+      const registrationDate = getTodayKST();
+
+      try {
+        const studentId = await db.transaction(async (tx) => {
+          const [student] = await tx
+            .insert(students)
+            .values({
+              name,
+              phoneNormalized,
+              gradeLevelId,
+              schoolId,
+              registrationDate,
+              statusEffectiveDate: registrationDate,
+              createdBy: req.admin!.id,
+              updatedBy: req.admin!.id,
+              createdAt: now,
+              updatedAt: now,
+            })
+            .returning();
+          if (!student) return null;
+          await syncStudentOwnPhone(tx, student.id, phoneNormalized);
+
+          if (guardianName && guardianRawPhone) {
+            const guardianPhoneNormalized = normalizePhone(guardianRawPhone);
+            if (guardianPhoneNormalized) {
+              const [existingGuardian] = await tx.select().from(guardians).where(eq(guardians.phoneNormalized, guardianPhoneNormalized));
+              const guardian =
+                existingGuardian ??
+                (
+                  await tx
+                    .insert(guardians)
+                    .values({ name: guardianName, phoneNormalized: guardianPhoneNormalized, createdBy: req.admin!.id, updatedBy: req.admin!.id })
+                    .returning()
+                )[0];
+              if (guardian) {
+                const [link] = await tx
+                  .insert(studentGuardians)
+                  .values({ studentId: student.id, guardianId: guardian.id, isPrimary: true, receiveMessages: true, useForCheckin: true, updatedAt: now })
+                  .returning();
+                if (link) {
+                  await upsertGuardianLinkPhone(tx, student.id, guardian.id, guardian.phoneNormalized, true);
+                }
+              }
+            }
+          }
+
+          return student.id;
+        });
+        if (studentId) {
+          created.push(studentId);
+          existingPhones.add(phoneNormalized);
+        }
+      } catch {
+        errors.push({ row: rowNumber, reason: '등록 중 오류가 발생했습니다.' });
+      }
+    }
+
+    await writeAuditLog({
+      adminId: req.admin!.id,
+      roleSnapshot: req.admin!.roleName,
+      action: 'student.bulkImport',
+      targetType: 'student',
+      targetId: null,
+      beforeDataSafe: null,
+      afterDataSafe: { createdCount: created.length, errorCount: errors.length },
+      result: 'success',
+      requestId: req.requestId,
+    });
+
+    res.json({
+      data: { createdCount: created.length, errors },
       meta: { requestId: req.requestId, kstTimestamp: getNowKSTISOString() },
     });
   });

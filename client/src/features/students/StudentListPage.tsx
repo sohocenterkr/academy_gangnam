@@ -1,6 +1,23 @@
-import { type FormEvent, useEffect, useState } from 'react';
+import { type ChangeEvent, type FormEvent, useEffect, useState } from 'react';
 import { Link } from 'wouter';
 import { ApiRequestError, apiGet, apiPost } from '../../lib/apiClient';
+
+interface ImportResult {
+  createdCount: number;
+  errors: { row: number; reason: string }[];
+}
+
+function readFileAsBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result as string;
+      resolve(result.split(',')[1] ?? '');
+    };
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
+  });
+}
 
 interface MaskedStudent {
   id: string;
@@ -53,6 +70,8 @@ export function StudentListPage() {
   const [schoolId, setSchoolId] = useState('');
   const [duplicates, setDuplicates] = useState<DuplicateCandidate[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [importing, setImporting] = useState(false);
+  const [importResult, setImportResult] = useState<ImportResult | null>(null);
 
   async function loadStudents(query?: string) {
     const path = query ? `/api/students?search=${encodeURIComponent(query)}` : '/api/students';
@@ -107,6 +126,25 @@ export function StudentListPage() {
     await submitCreate(false);
   }
 
+  async function handleImportFile(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    setError(null);
+    setImportResult(null);
+    setImporting(true);
+    try {
+      const fileBase64 = await readFileAsBase64(file);
+      const result = await apiPost<ImportResult>('/api/students/import', { fileBase64 });
+      setImportResult(result);
+      await loadStudents(search);
+    } catch (err) {
+      setError(err instanceof ApiRequestError ? err.message : '엑셀 업로드에 실패했습니다.');
+    } finally {
+      setImporting(false);
+    }
+  }
+
   return (
     <section className="p-4">
       <h1 className="text-xl font-semibold">학생 관리</h1>
@@ -130,6 +168,23 @@ export function StudentListPage() {
           검색
         </button>
       </form>
+
+      <div className="mt-4 flex flex-wrap items-center gap-3 rounded border border-gray-200 p-3">
+        <span className="text-sm font-medium">엑셀 일괄등록</span>
+        <a href="/api/students/import-template" className="text-sm text-blue-600 underline">
+          양식 다운로드
+        </a>
+        <label className="cursor-pointer rounded bg-gray-200 px-3 py-1 text-sm">
+          {importing ? '업로드 중...' : '엑셀 업로드(.xlsx)'}
+          <input type="file" accept=".xlsx" onChange={handleImportFile} disabled={importing} className="hidden" />
+        </label>
+        {importResult && (
+          <span className="text-sm text-gray-600">
+            {importResult.createdCount}명 등록됨
+            {importResult.errors.length > 0 && `, ${importResult.errors.length}건 오류(${importResult.errors.map((e) => `${e.row}행: ${e.reason}`).join('; ')})`}
+          </span>
+        )}
+      </div>
 
       <ul className="mt-4 space-y-2">
         {students.map((student) => (

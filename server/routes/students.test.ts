@@ -1,4 +1,5 @@
 import { and, eq, ilike, inArray } from 'drizzle-orm';
+import ExcelJS from 'exceljs';
 import { afterEach, describe, expect, it } from 'vitest';
 import request from 'supertest';
 import { db } from '../db';
@@ -546,5 +547,61 @@ describe('students routes — guardian linking', () => {
     const detail = await request(app).get(`/api/students/${student.body.data.student.id}`).set('Cookie', cookie);
     const linkAAfter = detail.body.data.guardians.find((g: { id: string }) => g.id === linkA.body.data.id);
     expect(linkAAfter.isPrimary).toBe(false);
+  });
+});
+
+async function buildImportWorkbookBase64(rows: string[][]): Promise<string> {
+  const workbook = new ExcelJS.Workbook();
+  const sheet = workbook.addWorksheet('학생명단');
+  sheet.addRow(['이름', '전화번호', '학년', '학교', '보호자이름', '보호자전화번호']);
+  for (const row of rows) sheet.addRow(row);
+  const buffer = await workbook.xlsx.writeBuffer();
+  return Buffer.from(buffer).toString('base64');
+}
+
+describe('students routes — bulk import', () => {
+  afterEach(async () => {
+    await cleanup();
+  });
+
+  it('rejects a non-xlsx payload', async () => {
+    await seedSuperAdminAndGrade();
+    const app = createApp({ emailAdapter: createFakeEmailAdapter() });
+    const cookie = await loginAs(app, SUPER_EMAIL);
+
+    const response = await request(app)
+      .post('/api/students/import')
+      .set('Cookie', cookie)
+      .send({ fileBase64: Buffer.from('not an xlsx file').toString('base64') });
+    expect(response.status).toBe(400);
+  });
+
+  it('imports valid rows, skips a duplicate phone and an unknown grade, and reports why', async () => {
+    const { gradeLevelId } = await seedSuperAdminAndGrade();
+    const app = createApp({ emailAdapter: createFakeEmailAdapter() });
+    const cookie = await loginAs(app, SUPER_EMAIL);
+
+    const first = await request(app).post('/api/students').set('Cookie', cookie).send({ name: TEST_STUDENT_NAME, phone: TEST_STUDENT_PHONE, gradeLevelId });
+    expect(first.status).toBe(200);
+
+    const fileBase64 = await buildImportWorkbookBase64([
+      ['test-student-엑셀1', '01011112222', TEST_GRADE_NAME, '', '', ''],
+      [TEST_STUDENT_NAME, TEST_STUDENT_PHONE, TEST_GRADE_NAME, '', '', ''], // duplicate phone
+      ['test-student-엑셀2', '01033334444', '없는학년', '', '', ''], // unknown grade
+    ]);
+
+    const response = await request(app).post('/api/students/import').set('Cookie', cookie).send({ fileBase64 });
+    expect(response.status).toBe(200);
+    expect(response.body.data.createdCount).toBe(1);
+    expect(response.body.data.errors).toHaveLength(2);
+    expect(response.body.data.errors.some((e: { reason: string }) => e.reason.includes('전화번호'))).toBe(true);
+    expect(response.body.data.errors.some((e: { reason: string }) => e.reason.includes('학년'))).toBe(true);
+
+    // Search by the name's non-numeric part — a search term containing a digit (as in "엑셀1")
+    // incidentally matches via this endpoint's phone-number fallback (normalizePhone("엑셀1")
+    // extracts "1", which is a substring of nearly every real phone number), which isn't what
+    // this assertion means to test. Only "엑셀1" should exist — "엑셀2" failed on unknown grade.
+    const list = await request(app).get('/api/students?search=test-student-엑셀').set('Cookie', cookie);
+    expect(list.body.data).toHaveLength(1);
   });
 });

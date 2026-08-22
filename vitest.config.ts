@@ -22,6 +22,11 @@ export default defineConfig({
   test: {
     globals: true,
     setupFiles: ['./vitest.setup.ts'],
+    // Server tests hit a real remote Postgres (Neon) for every assertion; the 5000ms default
+    // has caused sporadic false failures under load all session (courses.test.ts,
+    // messagingSettings.test.ts, ...) that pass cleanly in isolation. This doesn't mask real
+    // bugs — it just gives real network I/O realistic headroom.
+    testTimeout: 15000,
     projects: [
       {
         extends: true,

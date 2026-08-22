@@ -4,11 +4,12 @@ import { z } from 'zod';
 import { getNowKSTISOString } from '@shared/kst';
 import { PERMISSIONS } from '@shared/permissions';
 import { db } from '../db';
-import { cardNewsProjects, cardNewsMedia, mediaAssets, platformPresets } from '@shared/schema';
+import { cardNewsProjects, cardNewsMedia, cardNewsCards, aiGenerationLogs, mediaAssets, platformPresets } from '@shared/schema';
 import { parseBody } from '../utils/validate';
 import { createRequireAuth } from '../middleware/auth';
 import { createRequirePermission } from '../middleware/permissions';
 import { writeAuditLog } from '../services/audit';
+import type { OpenAIClient } from '../services/openaiCardNews';
 
 const PROJECT_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -47,8 +48,23 @@ const addMediaSchema = z.object({
   sortOrder: z.number().int().optional(),
 });
 
+const generateSchema = z.object({
+  cardCount: z.number().int().min(1).max(10).default(3),
+});
+
+const saveCardsSchema = z.object({
+  cards: z.array(z.object({ title: z.string().optional(), body: z.string().optional(), layoutJson: z.unknown().optional() })).min(1),
+});
+
+// Rough per-card token estimate used only to show a cost figure before generating — see
+// services/openaiCardNews.ts for why this can't be billing-accurate.
+const ESTIMATED_TOKENS_PER_CARD = { prompt: 300, completion: 150 };
+const ESTIMATED_TOKENS_PER_PHOTO = 400;
+const PRICE_PER_MILLION_TOKENS = { input: 0.15, output: 0.6 };
+
 export interface CardNewsRouterDeps {
   sessionSecret: string;
+  openai?: OpenAIClient;
 }
 
 export function createCardNewsRouter(deps: CardNewsRouterDeps): Router {
@@ -129,7 +145,9 @@ export function createCardNewsRouter(deps: CardNewsRouterDeps): Router {
       .where(eq(cardNewsMedia.projectId, id))
       .orderBy(cardNewsMedia.sortOrder);
 
-    res.json({ data: { ...project, media }, meta: { requestId: req.requestId, kstTimestamp: getNowKSTISOString() } });
+    const cards = await db.select().from(cardNewsCards).where(eq(cardNewsCards.projectId, id)).orderBy(cardNewsCards.sortOrder);
+
+    res.json({ data: { ...project, media, cards }, meta: { requestId: req.requestId, kstTimestamp: getNowKSTISOString() } });
   });
 
   router.patch('/:id', requireAuth, requireCardNewsManage, async (req, res) => {
@@ -268,6 +286,195 @@ export function createCardNewsRouter(deps: CardNewsRouterDeps): Router {
     });
 
     res.json({ data: { success: true }, meta: { requestId: req.requestId, kstTimestamp: getNowKSTISOString() } });
+  });
+
+  router.post('/:id/cost-estimate', requireAuth, requireCardNewsManage, async (req, res) => {
+    const id = req.params.id;
+    if (!id || Array.isArray(id)) {
+      res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: '잘못된 요청입니다.', requestId: req.requestId } });
+      return;
+    }
+    const parsed = parseBody(generateSchema, req.body, res, req.requestId);
+    if (!parsed) return;
+
+    const [project] = await db.select().from(cardNewsProjects).where(and(eq(cardNewsProjects.id, id), isNull(cardNewsProjects.deletedAt)));
+    if (!project) {
+      res.status(404).json({ error: { code: 'NOT_FOUND', message: '프로젝트를 찾을 수 없습니다.', requestId: req.requestId } });
+      return;
+    }
+
+    const photoCount = project.sendPhotosToAi
+      ? (await db.select().from(cardNewsMedia).where(and(eq(cardNewsMedia.projectId, id), eq(cardNewsMedia.role, 'source')))).length
+      : 0;
+    const promptTokens = ESTIMATED_TOKENS_PER_CARD.prompt * parsed.cardCount + ESTIMATED_TOKENS_PER_PHOTO * photoCount;
+    const completionTokens = ESTIMATED_TOKENS_PER_CARD.completion * parsed.cardCount;
+    const estimatedCostUsd =
+      (promptTokens / 1_000_000) * PRICE_PER_MILLION_TOKENS.input + (completionTokens / 1_000_000) * PRICE_PER_MILLION_TOKENS.output;
+
+    res.json({
+      data: { cardCount: parsed.cardCount, photoCount, estimatedCostUsd: Number(estimatedCostUsd.toFixed(4)) },
+      meta: { requestId: req.requestId, kstTimestamp: getNowKSTISOString() },
+    });
+  });
+
+  router.post('/:id/generate', requireAuth, requireCardNewsManage, async (req, res) => {
+    if (!deps.openai) {
+      res.status(503).json({ error: { code: 'AI_NOT_CONFIGURED', message: 'AI 공급자가 설정되지 않았습니다.', requestId: req.requestId } });
+      return;
+    }
+    const id = req.params.id;
+    if (!id || Array.isArray(id)) {
+      res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: '잘못된 요청입니다.', requestId: req.requestId } });
+      return;
+    }
+    const parsed = parseBody(generateSchema, req.body, res, req.requestId);
+    if (!parsed) return;
+
+    const [project] = await db.select().from(cardNewsProjects).where(and(eq(cardNewsProjects.id, id), isNull(cardNewsProjects.deletedAt)));
+    if (!project) {
+      res.status(404).json({ error: { code: 'NOT_FOUND', message: '프로젝트를 찾을 수 없습니다.', requestId: req.requestId } });
+      return;
+    }
+
+    let photoUrls: string[] = [];
+    if (project.sendPhotosToAi) {
+      if (!project.privacyConfirmedAt) {
+        res.status(400).json({
+          error: { code: 'VALIDATION_ERROR', message: '사진 전달 개인정보 확인이 되어 있지 않습니다.', requestId: req.requestId },
+        });
+        return;
+      }
+      const sourceMedia = await db
+        .select({ secureUrl: mediaAssets.secureUrl, resourceType: mediaAssets.resourceType })
+        .from(cardNewsMedia)
+        .innerJoin(mediaAssets, eq(cardNewsMedia.mediaId, mediaAssets.id))
+        .where(and(eq(cardNewsMedia.projectId, id), eq(cardNewsMedia.role, 'source')));
+      photoUrls = sourceMedia.filter((m) => m.resourceType === 'image').map((m) => m.secureUrl);
+    }
+
+    await db.update(cardNewsProjects).set({ status: 'generating', updatedAt: new Date() }).where(eq(cardNewsProjects.id, id));
+
+    let result;
+    try {
+      result = await deps.openai.generateCardNewsCopy({
+        title: project.title,
+        story: project.story,
+        hashtags: project.hashtags,
+        cardCount: parsed.cardCount,
+        photoUrls,
+      });
+    } catch {
+      await db.update(cardNewsProjects).set({ status: 'partial_error', updatedAt: new Date() }).where(eq(cardNewsProjects.id, id));
+      await db.insert(aiGenerationLogs).values({
+        projectId: id,
+        provider: 'openai',
+        model: 'gpt-4o-mini',
+        photosSent: photoUrls.length,
+        inputSummarySafe: `카드 ${parsed.cardCount}장 생성 요청`,
+        status: 'failed',
+        errorCode: 'OPENAI_REQUEST_FAILED',
+        createdBy: req.admin!.id,
+      });
+      res.status(502).json({
+        error: { code: 'AI_GENERATION_FAILED', message: 'AI 생성에 실패했습니다.', requestId: req.requestId },
+      });
+      return;
+    }
+
+    await db.delete(cardNewsCards).where(eq(cardNewsCards.projectId, id));
+    const insertedCards =
+      result.cards.length > 0
+        ? await db
+            .insert(cardNewsCards)
+            .values(
+              result.cards.map((card, index) => ({
+                projectId: id,
+                sortOrder: index,
+                title: card.title,
+                body: card.body,
+                status: 'draft' as const,
+                createdBy: req.admin!.id,
+                updatedBy: req.admin!.id,
+              }))
+            )
+            .returning()
+        : [];
+
+    const estimatedCostCents = Math.round(result.estimatedCostUsd * 100);
+    await db
+      .update(cardNewsProjects)
+      .set({
+        status: 'editing',
+        aiProvider: 'openai',
+        aiModel: result.model,
+        actualUsage: { promptTokens: result.promptTokens, completionTokens: result.completionTokens },
+        estimatedCost: estimatedCostCents,
+        updatedAt: new Date(),
+      })
+      .where(eq(cardNewsProjects.id, id));
+
+    await db.insert(aiGenerationLogs).values({
+      projectId: id,
+      provider: 'openai',
+      model: result.model,
+      photosSent: photoUrls.length,
+      inputSummarySafe: `카드 ${parsed.cardCount}장 생성`,
+      outputJson: { cards: result.cards },
+      usageJson: { promptTokens: result.promptTokens, completionTokens: result.completionTokens },
+      estimatedCost: estimatedCostCents,
+      actualCost: estimatedCostCents,
+      status: 'success',
+      createdBy: req.admin!.id,
+    });
+
+    await writeAuditLog({
+      adminId: req.admin!.id,
+      roleSnapshot: req.admin!.roleName,
+      action: 'cardNewsProject.generate',
+      targetType: 'cardNewsProject',
+      targetId: id,
+      beforeDataSafe: null,
+      afterDataSafe: { cardCount: insertedCards.length, photosSent: photoUrls.length },
+      result: 'success',
+      requestId: req.requestId,
+    });
+
+    res.json({ data: { cards: insertedCards, estimatedCostUsd: result.estimatedCostUsd }, meta: { requestId: req.requestId, kstTimestamp: getNowKSTISOString() } });
+  });
+
+  router.put('/:id/cards', requireAuth, requireCardNewsManage, async (req, res) => {
+    const id = req.params.id;
+    if (!id || Array.isArray(id)) {
+      res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: '잘못된 요청입니다.', requestId: req.requestId } });
+      return;
+    }
+    const parsed = parseBody(saveCardsSchema, req.body, res, req.requestId);
+    if (!parsed) return;
+
+    const [project] = await db.select().from(cardNewsProjects).where(and(eq(cardNewsProjects.id, id), isNull(cardNewsProjects.deletedAt)));
+    if (!project) {
+      res.status(404).json({ error: { code: 'NOT_FOUND', message: '프로젝트를 찾을 수 없습니다.', requestId: req.requestId } });
+      return;
+    }
+
+    await db.delete(cardNewsCards).where(eq(cardNewsCards.projectId, id));
+    const saved = await db
+      .insert(cardNewsCards)
+      .values(
+        parsed.cards.map((card, index) => ({
+          projectId: id,
+          sortOrder: index,
+          title: card.title,
+          body: card.body,
+          layoutJson: card.layoutJson,
+          status: 'ready' as const,
+          createdBy: req.admin!.id,
+          updatedBy: req.admin!.id,
+        }))
+      )
+      .returning();
+
+    res.json({ data: saved, meta: { requestId: req.requestId, kstTimestamp: getNowKSTISOString() } });
   });
 
   router.delete('/:id', requireAuth, requireCardNewsManage, async (req, res) => {

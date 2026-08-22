@@ -37,6 +37,7 @@ const baseProject = {
   expiresAt: '2026-08-29',
   updatedAt: '2026-08-22T00:00:00.000Z',
   media: [],
+  cards: [],
 };
 
 describe('CardNewsDetailPage', () => {
@@ -96,6 +97,48 @@ describe('CardNewsDetailPage', () => {
           method: 'PATCH',
           body: JSON.stringify({ sendPhotosToAi: true, privacyConfirmed: true, expectedUpdatedAt: baseProject.updatedAt }),
         })
+      )
+    );
+  });
+
+  it('estimates cost, confirms, generates cards, and saves edits to them', async () => {
+    const generatedCards = [{ id: 'c1', title: '카드 제목 1', body: '카드 본문 1', sortOrder: 0 }];
+    let generated = false;
+    const fetchMock = vi.fn();
+    fetchMock.mockImplementation((path: string, init?: RequestInit) => {
+      if (path === '/api/card-news/proj1' && (!init || init.method === undefined)) {
+        return Promise.resolve(jsonResponse(generated ? { ...baseProject, cards: generatedCards } : baseProject));
+      }
+      if (path === '/api/card-news/proj1/cost-estimate' && init?.method === 'POST') {
+        return Promise.resolve(jsonResponse({ cardCount: 3, photoCount: 0, estimatedCostUsd: 0.0002 }));
+      }
+      if (path === '/api/card-news/proj1/generate' && init?.method === 'POST') {
+        generated = true;
+        return Promise.resolve(jsonResponse({ cards: generatedCards, estimatedCostUsd: 0.0002 }));
+      }
+      if (path === '/api/card-news/proj1/cards' && init?.method === 'PUT') {
+        return Promise.resolve(jsonResponse([{ ...generatedCards[0], title: '수정된 제목' }]));
+      }
+      throw new Error(`unexpected fetch: ${path} ${init?.method ?? 'GET'}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    vi.stubGlobal('confirm', vi.fn().mockReturnValue(true));
+
+    renderAtProject('proj1');
+    await screen.findByText('여름 특강 홍보');
+
+    fireEvent.click(screen.getByRole('button', { name: 'AI로 생성' }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/card-news/proj1/cost-estimate', expect.objectContaining({ method: 'POST' })));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/card-news/proj1/generate', expect.objectContaining({ method: 'POST' })));
+
+    const titleInput = await screen.findByPlaceholderText('카드 제목');
+    fireEvent.change(titleInput, { target: { value: '수정된 제목' } });
+    fireEvent.click(screen.getByRole('button', { name: '카드 내용 저장' }));
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        '/api/card-news/proj1/cards',
+        expect.objectContaining({ method: 'PUT', body: JSON.stringify({ cards: [{ title: '수정된 제목', body: '카드 본문 1' }] }) })
       )
     );
   });

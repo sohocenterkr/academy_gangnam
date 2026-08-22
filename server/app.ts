@@ -26,6 +26,7 @@ import { createMessageCampaignsRouter, createMessageUsageRouter } from './routes
 import { createPushbulletSmsClient, type PushbulletSmsClient } from './services/pushbulletSms';
 import { createPlatformPresetsRouter } from './routes/platformPresets';
 import { createCardNewsRouter } from './routes/cardNews';
+import { createOpenAIClient, type OpenAIClient } from './services/openaiCardNews';
 import { createDashboardRouter } from './routes/dashboard';
 import { createAuditLogsRouter } from './routes/auditLogs';
 import { createCronRouter } from './routes/cron';
@@ -43,6 +44,7 @@ export interface AppOverrides {
   pushbulletTokenEncryptionKey?: string;
   pushbulletSms?: PushbulletSmsClient;
   cronSecret?: string;
+  openai?: OpenAIClient;
 }
 
 export function createApp(overrides: AppOverrides = {}): Express {
@@ -52,7 +54,12 @@ export function createApp(overrides: AppOverrides = {}): Express {
   const emailAdapter = overrides.emailAdapter ?? createResendEmailAdapter(env.RESEND_API_KEY, env.RESEND_FROM_EMAIL);
 
   app.use(requestId);
-  app.use(express.json());
+  // Default express.json() caps requests at 100kb. Raised for the whole app (not just the
+  // student-import route) since Vercel's own function body limit (~4.5MB) is already the real
+  // ceiling — this isn't a file-relay path (spec §13.6 bans multer/formidable/busboy for binary
+  // media uploads specifically), just a small base64-encoded .xlsx for one-time parsing that's
+  // never stored.
+  app.use(express.json({ limit: '5mb' }));
   app.use(
     '/api/auth',
     createAuthRouter({
@@ -140,7 +147,8 @@ export function createApp(overrides: AppOverrides = {}): Express {
   }
 
   app.use('/api/platform-presets', createPlatformPresetsRouter({ sessionSecret: env.AUTH_SESSION_SECRET }));
-  app.use('/api/card-news', createCardNewsRouter({ sessionSecret: env.AUTH_SESSION_SECRET }));
+  const openai = overrides.openai ?? (env.OPENAI_API_KEY ? createOpenAIClient(env.OPENAI_API_KEY) : undefined);
+  app.use('/api/card-news', createCardNewsRouter({ sessionSecret: env.AUTH_SESSION_SECRET, openai }));
   app.use('/api/dashboard', createDashboardRouter({ sessionSecret: env.AUTH_SESSION_SECRET }));
   app.use('/api/audit-logs', createAuditLogsRouter({ sessionSecret: env.AUTH_SESSION_SECRET }));
   app.use('/api/reports', createReportsRouter({ sessionSecret: env.AUTH_SESSION_SECRET }));

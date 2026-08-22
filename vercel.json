@@ -1,5 +1,23 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "buildCommand": "npm run build && npm run build:vercel",
-  "regions": ["sin1"]
+  "regions": ["sin1"],
+  "crons": [
+    {
+      "path": "/api/cron/process-message-queue",
+      "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/cron/cleanup-card-news",
+      "schedule": "0 18 * * *"
+    },
+    {
+      "path": "/api/cron/scan-orphan-media",
+      "schedule": "10 18 * * *"
+    },
+    {
+      "path": "/api/cron/cleanup-orphan-media",
+      "schedule": "20 18 * * *"
+    }
+  ]
 }
