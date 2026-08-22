@@ -18,6 +18,7 @@ import { MessagingSettingsPage } from './features/messaging/MessagingSettingsPag
 import { MessageTemplatesPage } from './features/messaging/MessageTemplatesPage';
 import { MessageDraftsListPage } from './features/messaging/MessageDraftsListPage';
 import { MessageDraftDetailPage } from './features/messaging/MessageDraftDetailPage';
+import { MessageCampaignsPage } from './features/messaging/MessageCampaignsPage';
 import { PlatformPresetsPage } from './features/cardNews/PlatformPresetsPage';
 import { CardNewsListPage } from './features/cardNews/CardNewsListPage';
 import { CardNewsDetailPage } from './features/cardNews/CardNewsDetailPage';
@@ -107,6 +108,11 @@ export function AppRoutes() {
       <Route path="/admin/messaging/drafts">
         <ProtectedRoute>
           <MessageDraftsListPage />
+        </ProtectedRoute>
+      </Route>
+      <Route path="/admin/messaging/campaigns">
+        <ProtectedRoute>
+          <MessageCampaignsPage />
         </ProtectedRoute>
       </Route>
       <Route path="/admin/card-news/presets">
