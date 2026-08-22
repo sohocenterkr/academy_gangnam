@@ -16,6 +16,7 @@ const envSchema = z.object({
   CLOUDINARY_API_SECRET: emptyToUndefined(z.string().min(1).optional()),
   CLOUDINARY_UPLOAD_ROOT: emptyToUndefined(z.string().min(1).optional()),
   PUSHBULLET_TOKEN_ENCRYPTION_KEY: emptyToUndefined(z.string().min(16).optional()),
+  CRON_SECRET: emptyToUndefined(z.string().min(16).optional()),
 });
 
 function emptyToUndefined<T extends z.ZodTypeAny>(schema: T) {

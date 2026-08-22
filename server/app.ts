@@ -28,6 +28,7 @@ import { createPlatformPresetsRouter } from './routes/platformPresets';
 import { createCardNewsRouter } from './routes/cardNews';
 import { createDashboardRouter } from './routes/dashboard';
 import { createAuditLogsRouter } from './routes/auditLogs';
+import { createCronRouter } from './routes/cron';
 import { loadEnv } from './env';
 import { createResendEmailAdapter } from './services/email';
 import { createCloudinaryClient, type CloudinaryClient } from './services/cloudinary';
@@ -39,6 +40,7 @@ export interface AppOverrides {
   pushbullet?: PushbulletClient;
   pushbulletTokenEncryptionKey?: string;
   pushbulletSms?: PushbulletSmsClient;
+  cronSecret?: string;
 }
 
 export function createApp(overrides: AppOverrides = {}): Express {
@@ -83,15 +85,15 @@ export function createApp(overrides: AppOverrides = {}): Express {
 
   const cloudinaryConfigured =
     env.CLOUDINARY_CLOUD_NAME && env.CLOUDINARY_API_KEY && env.CLOUDINARY_API_SECRET && env.CLOUDINARY_UPLOAD_ROOT;
-  if (overrides.cloudinary || cloudinaryConfigured) {
-    const cloudinary =
-      overrides.cloudinary ??
-      createCloudinaryClient({
+  const cloudinary = overrides.cloudinary ?? (cloudinaryConfigured
+    ? createCloudinaryClient({
         cloudName: env.CLOUDINARY_CLOUD_NAME!,
         apiKey: env.CLOUDINARY_API_KEY!,
         apiSecret: env.CLOUDINARY_API_SECRET!,
         uploadRoot: env.CLOUDINARY_UPLOAD_ROOT!,
-      });
+      })
+    : undefined);
+  if (cloudinary) {
     app.use(
       '/api/uploads',
       createUploadsRouter({
@@ -135,6 +137,18 @@ export function createApp(overrides: AppOverrides = {}): Express {
   app.use('/api/card-news', createCardNewsRouter({ sessionSecret: env.AUTH_SESSION_SECRET }));
   app.use('/api/dashboard', createDashboardRouter({ sessionSecret: env.AUTH_SESSION_SECRET }));
   app.use('/api/audit-logs', createAuditLogsRouter({ sessionSecret: env.AUTH_SESSION_SECRET }));
+
+  const cronSecret = overrides.cronSecret ?? env.CRON_SECRET;
+  if (cronSecret) {
+    app.use(
+      '/api/cron',
+      createCronRouter({
+        cronSecret,
+        dispatch: { pushbulletSms: overrides.pushbulletSms ?? createPushbulletSmsClient(), tokenEncryptionKey: tokenEncryptionKey ?? '' },
+        cloudinary,
+      })
+    );
+  }
 
   app.use('/api', healthRouter);
   app.use('/api', (req, res) => {
