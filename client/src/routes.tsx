@@ -7,6 +7,8 @@ import { AcademySettingsPage } from './features/settings/AcademySettingsPage';
 import { AcademicsSettingsPage } from './features/settings/AcademicsSettingsPage';
 import { AuditLogsPage } from './features/settings/AuditLogsPage';
 import { ReportsPage } from './features/settings/ReportsPage';
+import { AdminsPage } from './features/settings/AdminsPage';
+import { RolesPage } from './features/settings/RolesPage';
 import { GuardianListPage } from './features/guardians/GuardianListPage';
 import { GuardianDetailPage } from './features/guardians/GuardianDetailPage';
 import { StudentListPage } from './features/students/StudentListPage';
@@ -60,6 +62,16 @@ export function AppRoutes() {
       <Route path="/admin/reports">
         <ProtectedRoute>
           <ReportsPage />
+        </ProtectedRoute>
+      </Route>
+      <Route path="/admin/settings/admins">
+        <ProtectedRoute>
+          <AdminsPage />
+        </ProtectedRoute>
+      </Route>
+      <Route path="/admin/settings/roles">
+        <ProtectedRoute>
+          <RolesPage />
         </ProtectedRoute>
       </Route>
       <Route path="/admin/guardians">

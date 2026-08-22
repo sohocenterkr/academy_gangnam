@@ -128,6 +128,16 @@ export function AdminHomePage() {
             </Link>
           </li>
           <li>
+            <Link href="/admin/settings/admins" className="text-blue-600 underline">
+              관리자 계정
+            </Link>
+          </li>
+          <li>
+            <Link href="/admin/settings/roles" className="text-blue-600 underline">
+              역할·권한 관리
+            </Link>
+          </li>
+          <li>
             <Link href="/admin/reports" className="text-blue-600 underline">
               보고서
             </Link>
