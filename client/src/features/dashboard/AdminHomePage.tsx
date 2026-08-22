@@ -59,6 +59,11 @@ export function AdminHomePage() {
             </Link>
           </li>
           <li>
+            <Link href="/admin/messaging/drafts" className="text-blue-600 underline">
+              문자 발송
+            </Link>
+          </li>
+          <li>
             <Link href="/admin/card-news" className="text-blue-600 underline">
               카드뉴스
             </Link>

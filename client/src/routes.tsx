@@ -16,6 +16,8 @@ import { CourseListPage } from './features/courses/CourseListPage';
 import { CourseDetailPage } from './features/courses/CourseDetailPage';
 import { MessagingSettingsPage } from './features/messaging/MessagingSettingsPage';
 import { MessageTemplatesPage } from './features/messaging/MessageTemplatesPage';
+import { MessageDraftsListPage } from './features/messaging/MessageDraftsListPage';
+import { MessageDraftDetailPage } from './features/messaging/MessageDraftDetailPage';
 import { PlatformPresetsPage } from './features/cardNews/PlatformPresetsPage';
 import { CardNewsListPage } from './features/cardNews/CardNewsListPage';
 import { CardNewsDetailPage } from './features/cardNews/CardNewsDetailPage';
@@ -95,6 +97,16 @@ export function AppRoutes() {
       <Route path="/admin/messaging/templates">
         <ProtectedRoute>
           <MessageTemplatesPage />
+        </ProtectedRoute>
+      </Route>
+      <Route path="/admin/messaging/drafts/:draftId">
+        <ProtectedRoute>
+          <MessageDraftDetailPage />
+        </ProtectedRoute>
+      </Route>
+      <Route path="/admin/messaging/drafts">
+        <ProtectedRoute>
+          <MessageDraftsListPage />
         </ProtectedRoute>
       </Route>
       <Route path="/admin/card-news/presets">

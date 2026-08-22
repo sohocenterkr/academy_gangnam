@@ -53,6 +53,11 @@ export function createMessageDraftsRouter(deps: MessageDraftsRouterDeps): Router
   const requireAuth = createRequireAuth(deps.sessionSecret);
   const requireMessagingManage = createRequirePermission(PERMISSIONS.MESSAGING_MANAGE);
 
+  router.get('/', requireAuth, requireMessagingManage, async (req, res) => {
+    const rows = await db.select().from(messageCampaigns).orderBy(sql`${messageCampaigns.createdAt} desc`);
+    res.json({ data: rows, meta: { requestId: req.requestId, kstTimestamp: getNowKSTISOString() } });
+  });
+
   router.post('/', requireAuth, requireMessagingManage, async (req, res) => {
     const parsed = parseBody(createDraftSchema, req.body, res, req.requestId);
     if (!parsed) return;
