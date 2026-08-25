@@ -90,12 +90,18 @@ export function CourseDetailPage() {
     setEnrollments(data);
   }
 
+  async function reloadExceptions() {
+    if (!courseId) return;
+    const data = await apiGet<CourseException[]>(`/api/courses/${courseId}/exceptions`);
+    setExceptions(data);
+  }
+
   useEffect(() => {
     if (!courseId) return;
 
     async function load() {
       try {
-        await Promise.all([reloadCourse(), reloadEnrollments()]);
+        await Promise.all([reloadCourse(), reloadEnrollments(), reloadExceptions()]);
       } catch (err) {
         setError(err instanceof ApiRequestError ? err.message : '불러오지 못했습니다.');
       }
@@ -178,7 +184,7 @@ export function CourseDetailPage() {
       setStudentId('');
       setEnrollStartDate('');
       setTuitionAmount('');
-      await reloadEnrollments();
+      await Promise.all([reloadEnrollments(), reloadCourse()]);
     } catch (err) {
       if (err instanceof ApiRequestError && err.code === 'PERIOD_OVERLAP') {
         const data = err.data as { conflicts?: EnrollmentConflict[] } | undefined;
@@ -199,7 +205,7 @@ export function CourseDetailPage() {
     setError(null);
     try {
       await apiPost(`/api/enrollments/${enrollmentId}/end`, {});
-      await reloadEnrollments();
+      await Promise.all([reloadEnrollments(), reloadCourse()]);
     } catch (err) {
       setError(err instanceof ApiRequestError ? err.message : '종료 처리에 실패했습니다.');
     }
@@ -209,7 +215,7 @@ export function CourseDetailPage() {
     setError(null);
     try {
       await apiPost(`/api/enrollments/${enrollmentId}/cancel`, {});
-      await reloadEnrollments();
+      await Promise.all([reloadEnrollments(), reloadCourse()]);
     } catch (err) {
       setError(err instanceof ApiRequestError ? err.message : '취소 처리에 실패했습니다.');
     }
@@ -298,9 +304,6 @@ export function CourseDetailPage() {
 
       <div className="mt-6 rounded border border-gray-200 p-4">
         <h2 className="text-lg font-medium">휴강·보강</h2>
-        <p className="mt-1 text-xs text-gray-500">
-          이 목록은 현재 화면에서 추가한 항목만 보여줍니다. 새로고침하면 이전에 추가된 휴강·보강 내역은 다시 불러올 수 없습니다.
-        </p>
         <ul className="mt-2 space-y-2">
           {exceptions.map((item) => (
             <li key={item.id} className="flex items-center justify-between rounded border border-gray-100 p-2">

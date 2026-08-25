@@ -46,6 +46,7 @@ export function AcademySettingsPage() {
         phoneNormalized,
         address,
         senderName,
+        expectedUpdatedAt: settings.updatedAt,
       });
       setSettings(updated);
       setStatus('saved');

@@ -51,5 +51,8 @@ describe('AcademySettingsPage', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(fetchMock.mock.calls[1]![0]).toBe('/api/settings/academy');
     expect(fetchMock.mock.calls[1]![1]).toMatchObject({ method: 'PATCH' });
+    expect(JSON.parse(fetchMock.mock.calls[1]![1].body)).toMatchObject({
+      expectedUpdatedAt: '2026-08-15T00:00:00+09:00',
+    });
   });
 });

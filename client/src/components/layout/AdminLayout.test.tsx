@@ -60,6 +60,27 @@ describe('AdminLayout', () => {
     }
   });
 
+  it('hides nav items and empties groups the admin lacks permission for', () => {
+    const limitedAdmin: AuthenticatedAdmin = {
+      id: '2',
+      email: 'c@d.com',
+      name: '문자담당',
+      role: { id: 'r2', name: '문자 담당자', permissions: ['messaging:manage'] },
+    };
+    render(
+      <Router>
+        <AdminLayout admin={limitedAdmin}>
+          <p>페이지 내용</p>
+        </AdminLayout>
+      </Router>
+    );
+
+    expect(screen.getByRole('link', { name: '문자 발송 설정' })).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: '학생 관리' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: '관리자 계정' })).not.toBeInTheDocument();
+    expect(screen.queryByText('카드뉴스', { selector: 'p' })).not.toBeInTheDocument();
+  });
+
   it('logs out and redirects to /login when the logout button is clicked', async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,

@@ -63,6 +63,7 @@ describe('CourseDetailPage', () => {
     fetchMock.mockImplementation((path: string, init?: RequestInit) => {
       if (path === '/api/courses/c1' && (!init || init.method === undefined)) return Promise.resolve(jsonResponse(baseCourse));
       if (path === '/api/enrollments?courseId=c1' && (!init || init.method === undefined)) return Promise.resolve(jsonResponse(baseEnrollments));
+      if (path === '/api/courses/c1/exceptions' && (!init || init.method === undefined)) return Promise.resolve(jsonResponse([]));
       throw new Error(`unexpected fetch: ${path} ${init?.method ?? 'GET'}`);
     });
     vi.stubGlobal('fetch', fetchMock);
@@ -90,6 +91,7 @@ describe('CourseDetailPage', () => {
         expect(body).toEqual({ dayOfWeek: 3, startTime: '14:00', endTime: '15:00', classroom: '302호' });
         return Promise.resolve(jsonResponse({ id: 'sch2', courseId: 'c1', ...body, isActive: true }));
       }
+      if (path === '/api/courses/c1/exceptions' && (!init || init.method === undefined)) return Promise.resolve(jsonResponse([]));
       throw new Error(`unexpected fetch: ${path} ${init?.method ?? 'GET'}`);
     });
     vi.stubGlobal('fetch', fetchMock);
@@ -120,6 +122,7 @@ describe('CourseDetailPage', () => {
         enrolled = true;
         return Promise.resolve(jsonResponse({ id: 'en2', ...body, status: 'active', updatedAt: '2026-08-15T00:00:00+09:00' }));
       }
+      if (path === '/api/courses/c1/exceptions' && (!init || init.method === undefined)) return Promise.resolve(jsonResponse([]));
       throw new Error(`unexpected fetch: ${path} ${init?.method ?? 'GET'}`);
     });
     vi.stubGlobal('fetch', fetchMock);
@@ -157,6 +160,7 @@ describe('CourseDetailPage', () => {
         confirmed = true;
         return Promise.resolve(jsonResponse({ id: 'en2', ...body, status: 'active', updatedAt: '2026-08-15T00:00:00+09:00' }));
       }
+      if (path === '/api/courses/c1/exceptions' && (!init || init.method === undefined)) return Promise.resolve(jsonResponse([]));
       throw new Error(`unexpected fetch: ${path} ${init?.method ?? 'GET'}`);
     });
     vi.stubGlobal('fetch', fetchMock);

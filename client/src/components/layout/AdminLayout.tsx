@@ -3,6 +3,7 @@ import { Link, useLocation } from 'wouter';
 import { apiPost } from '../../lib/apiClient';
 import type { AuthenticatedAdmin } from '../../hooks/useAuth';
 import { ADMIN_NAV_GROUPS } from './adminNav';
+import { SUPER_ADMIN_WILDCARD_PERMISSION } from '@shared/permissions';
 
 interface AdminLayoutProps {
   admin: AuthenticatedAdmin;
@@ -17,6 +18,15 @@ export function AdminLayout({ admin, children }: AdminLayoutProps) {
     await apiPost('/api/auth/logout', {});
     navigate('/login');
   }
+
+  const hasPermission = admin.role.permissions.includes(SUPER_ADMIN_WILDCARD_PERMISSION)
+    ? () => true
+    : (permission: string) => admin.role.permissions.includes(permission);
+
+  const visibleNavGroups = ADMIN_NAV_GROUPS.map((group) => ({
+    ...group,
+    items: group.items.filter((item) => hasPermission(item.permission)),
+  })).filter((group) => group.items.length > 0);
 
   const sidebarContent = (
     <nav className="flex h-full flex-col overflow-y-auto px-3 py-4">
@@ -42,7 +52,7 @@ export function AdminLayout({ admin, children }: AdminLayoutProps) {
           </Link>
         </li>
       </ul>
-      {ADMIN_NAV_GROUPS.map((group) => (
+      {visibleNavGroups.map((group) => (
         <div key={group.title} className="mt-5">
           <p className="px-3 text-xs font-semibold uppercase tracking-wide text-slate-500">{group.title}</p>
           <ul className="mt-1 space-y-1">

@@ -32,6 +32,17 @@ export function createCourseExceptionsRouter(deps: CourseExceptionsRouterDeps): 
   const requireAuth = createRequireAuth(deps.sessionSecret);
   const requireCoursesManage = createRequirePermission(PERMISSIONS.COURSES_MANAGE);
 
+  router.get('/courses/:id/exceptions', requireAuth, requireCoursesManage, async (req, res) => {
+    const courseId = req.params.id;
+    if (!courseId || Array.isArray(courseId)) {
+      res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: '잘못된 요청입니다.', requestId: req.requestId } });
+      return;
+    }
+
+    const rows = await db.select().from(courseExceptions).where(eq(courseExceptions.courseId, courseId));
+    res.json({ data: rows, meta: { requestId: req.requestId, kstTimestamp: getNowKSTISOString() } });
+  });
+
   router.post('/courses/:id/exceptions', requireAuth, requireCoursesManage, async (req, res) => {
     const courseId = req.params.id;
     if (!courseId || Array.isArray(courseId)) {

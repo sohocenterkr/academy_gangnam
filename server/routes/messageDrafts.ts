@@ -75,7 +75,11 @@ export function createMessageDraftsRouter(deps: MessageDraftsRouterDeps): Router
         messageType: parsed.messageType,
         templateId: parsed.templateId,
         bodySource,
-        recipientType: 'individual',
+        // Defaults to 'all' because the recipient-condition dropdown in
+        // MessageDraftDetailPage only offers all/grade/course — 'individual' has no
+        // UI path to select it, so defaulting to it silently resolved to 0 recipients
+        // until the admin touched the (already-selected-looking) dropdown.
+        recipientType: 'all',
         idempotencyKey: randomUUID(),
         createdBy: req.admin!.id,
       })
