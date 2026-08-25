@@ -24,40 +24,47 @@ export function LoginPage() {
   }
 
   return (
-    <form onSubmit={handleSubmit} className="mx-auto mt-16 flex max-w-sm flex-col gap-4">
-      <h1 className="text-xl font-semibold">관리자 로그인</h1>
-      <label className="flex flex-col gap-1">
-        <span>이메일</span>
-        <input
-          type="email"
-          value={email}
-          onChange={(event) => setEmail(event.target.value)}
-          required
-          className="rounded border border-gray-300 px-3 py-2 text-base"
-        />
-      </label>
-      <label className="flex flex-col gap-1">
-        <span>비밀번호</span>
-        <input
-          type="password"
-          value={password}
-          onChange={(event) => setPassword(event.target.value)}
-          required
-          className="rounded border border-gray-300 px-3 py-2 text-base"
-        />
-      </label>
-      {error && (
-        <p role="alert" className="text-sm text-red-600">
-          {error}
-        </p>
-      )}
-      <button
-        type="submit"
-        disabled={submitting}
-        className="rounded bg-blue-600 px-4 py-2 text-white disabled:opacity-50"
+    <div className="flex min-h-screen items-center justify-center bg-gray-50 px-4">
+      <form
+        onSubmit={handleSubmit}
+        className="w-full max-w-sm rounded-2xl border border-gray-200 bg-white p-8 shadow-sm"
       >
-        로그인
-      </button>
-    </form>
+        <h1 className="text-center text-lg font-semibold text-gray-900">학원 업무자동화</h1>
+        <p className="mt-1 text-center text-sm text-gray-500">관리자 로그인</p>
+
+        <label className="mt-6 flex flex-col gap-1">
+          <span className="text-sm font-medium text-gray-700">이메일</span>
+          <input
+            type="email"
+            value={email}
+            onChange={(event) => setEmail(event.target.value)}
+            required
+            className="rounded-lg border border-gray-300 px-3 py-2 text-base focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+          />
+        </label>
+        <label className="mt-4 flex flex-col gap-1">
+          <span className="text-sm font-medium text-gray-700">비밀번호</span>
+          <input
+            type="password"
+            value={password}
+            onChange={(event) => setPassword(event.target.value)}
+            required
+            className="rounded-lg border border-gray-300 px-3 py-2 text-base focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+          />
+        </label>
+        {error && (
+          <p role="alert" className="mt-4 text-sm text-red-600">
+            {error}
+          </p>
+        )}
+        <button
+          type="submit"
+          disabled={submitting}
+          className="mt-6 w-full rounded-lg bg-blue-600 px-4 py-2.5 font-medium text-white transition-colors hover:bg-blue-700 disabled:opacity-50"
+        >
+          로그인
+        </button>
+      </form>
+    </div>
   );
 }

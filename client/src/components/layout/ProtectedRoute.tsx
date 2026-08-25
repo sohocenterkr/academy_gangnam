@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import { Redirect } from 'wouter';
 import { useAuth } from '../../hooks/useAuth';
+import { AdminLayout } from './AdminLayout';
 
 interface ProtectedRouteProps {
   children: ReactNode;
@@ -17,5 +18,5 @@ export function ProtectedRoute({ children }: ProtectedRouteProps) {
     return <Redirect to="/login" />;
   }
 
-  return <>{children}</>;
+  return <AdminLayout admin={admin}>{children}</AdminLayout>;
 }
