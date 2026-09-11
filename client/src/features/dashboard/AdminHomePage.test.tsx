@@ -24,6 +24,25 @@ describe('AdminHomePage', () => {
     await waitFor(() => expect(screen.getByText(/홍길동/)).toBeInTheDocument());
   });
 
+  it('links to the public check-in kiosk screen, opened in a new tab', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          data: { id: '1', email: 'a@b.com', name: '홍길동', role: { id: 'r1', name: '최고관리자', permissions: ['*'] } },
+          meta: { requestId: 'req-1', kstTimestamp: '2026-08-15T00:30:00+09:00' },
+        }),
+      })
+    );
+
+    render(<AdminHomePage />);
+
+    const link = await screen.findByRole('link', { name: '등원 체크인 화면 열기' });
+    expect(link).toHaveAttribute('href', '/check-in');
+    expect(link).toHaveAttribute('target', '_blank');
+  });
+
   it('shows the dashboard summary stats once loaded', async () => {
     vi.stubGlobal(
       'fetch',

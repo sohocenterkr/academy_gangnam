@@ -33,8 +33,20 @@ export function AdminHomePage() {
 
   return (
     <section>
-      <h1 className="text-2xl font-semibold text-gray-900">{admin.name}님, 안녕하세요</h1>
-      <p className="mt-1 text-gray-500">학원 업무자동화 관리자 화면입니다.</p>
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-semibold text-gray-900">{admin.name}님, 안녕하세요</h1>
+          <p className="mt-1 text-gray-500">학원 업무자동화 관리자 화면입니다.</p>
+        </div>
+        <a
+          href="/check-in"
+          target="_blank"
+          rel="noreferrer"
+          className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-blue-700"
+        >
+          등원 체크인 화면 열기
+        </a>
+      </div>
 
       {summary && (
         <dl className="mt-6 grid grid-cols-2 gap-4 sm:grid-cols-4">
