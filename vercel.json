@@ -5,7 +5,7 @@
   "crons": [
     {
       "path": "/api/cron/process-message-queue",
-      "schedule": "*/5 * * * *"
+      "schedule": "*/10 * * * *"
     },
     {
       "path": "/api/cron/cleanup-card-news",
